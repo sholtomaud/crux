@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>crux — DB Explorer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; padding: 2rem; }
+    a { color: #60a5fa; text-decoration: none; }
+    h1 { font-size: 1.4rem; color: #fff; margin-bottom: 1.5rem; }
+    .tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .tab { padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid #333; font-size: 0.8rem; cursor: pointer; background: #1a1a1a; color: #aaa; }
+    .tab.active { background: #252525; color: #fff; border-color: #555; }
+    #table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th { text-align: left; color: #888; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2a2a; white-space: nowrap; }
+    td { padding: 0.35rem 0.6rem; border-bottom: 1px solid #1a1a1a; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+    .loading { color: #666; font-size: 0.9rem; }
+    .count { font-size: 0.78rem; color: #555; margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← all projects</a></p>
+  <h1>DB Explorer</h1>
+  <div class="tabs" id="tabs"></div>
+  <div class="count" id="count"></div>
+  <div id="table-wrap"><p class="loading">Select a table above.</p></div>
+
+  <script src="/app.js"></script>
+  <script>
+    const TABLES = ['projects','tasks','dependencies','sessions','roi_records','test_runs','audit','adrs','task_adrs'];
+    let active = null;
+
+    const tabsEl  = document.getElementById('tabs');
+    const countEl = document.getElementById('count');
+    const wrap    = document.getElementById('table-wrap');
+
+    for (const t of TABLES) {
+      const btn = document.createElement('button');
+      btn.className = 'tab';
+      btn.textContent = t;
+      btn.onclick = () => loadTable(t);
+      tabsEl.appendChild(btn);
+    }
+
+    async function loadTable(name) {
+      active = name;
+      document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.textContent === name));
+      wrap.innerHTML = '<p class="loading">Loading…</p>';
+      let rows;
+      try { rows = await fetchJson(`/api/db/${name}`); }
+      catch (e) { wrap.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
+
+      if (rows.length === 0) { wrap.innerHTML = '<p class="loading">(empty)</p>'; countEl.textContent = '0 rows'; return; }
+      countEl.textContent = `${rows.length} rows`;
+
+      const cols = Object.keys(rows[0]);
+      wrap.innerHTML = `
+        <table>
+          <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr>${cols.map(c => `<td title="${String(r[c] ?? '')}">${r[c] ?? ''}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    loadTable('projects');
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Exclude sensitive and dev-only files from the bundle
+.claude/
+.crux-home/
+dist/
+*.mcpb
+.git/
+.gitignore
+.mcpbignore
+test/
+REQUIREMENTS.MD
+TASKS.md
+app.mcpb
+sea-config.json
+esbuild.config.mjs
+crux-mcp.sh
+scripts/

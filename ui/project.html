@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>crux — Project</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; padding: 2rem; }
+    a { color: #60a5fa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 { font-size: 1.4rem; color: #fff; margin-bottom: 0.25rem; }
+    h2 { font-size: 1rem; color: #aaa; margin: 1.5rem 0 0.75rem; }
+    .meta { font-size: 0.82rem; color: #666; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; color: #888; font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2a2a; }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #1e1e1e; }
+    tr.critical td { border-left: 2px solid #f87171; }
+    .badge { font-size: 0.7rem; padding: 0.15em 0.5em; border-radius: 4px; font-weight: 600; }
+    .badge-open      { background: #1e3a5f; color: #60a5fa; }
+    .badge-inprogress{ background: #3a2e1a; color: #f59e0b; }
+    .badge-blocked   { background: #3a1a1a; color: #f87171; }
+    .badge-done      { background: #1a3a2a; color: #34d399; }
+    .badge-dropped   { background: #2a2a2a; color: #888; }
+    .critical-path { padding: 0.75rem 1rem; background: #1a1a1a; border-radius: 6px; font-size: 0.82rem; color: #ccc; margin-bottom: 1rem; }
+    .critical-path .slug { color: #f87171; font-weight: 600; }
+    .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .stat { background: #1a1a1a; border-radius: 6px; padding: 0.75rem 1rem; }
+    .stat-value { font-size: 1.4rem; font-weight: 700; color: #fff; }
+    .stat-label { font-size: 0.72rem; color: #666; margin-top: 0.2rem; }
+    .loading { color: #666; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← all projects</a></p>
+  <div id="content"><p class="loading">Loading…</p></div>
+
+  <script src="/app.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+
+    async function render() {
+      const content = document.getElementById('content');
+      if (!id) { content.innerHTML = '<p>No project id in URL.</p>'; return; }
+
+      let data, cpm;
+      try {
+        [data, cpm] = await Promise.all([
+          fetchJson(`/api/project/${id}`),
+          fetchJson(`/api/cpm/${id}`),
+        ]);
+      } catch (e) { content.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
+
+      const { project, tasks, status, roi, hours } = data;
+      document.title = `crux — ${project.name}`;
+
+      const roiScore = hours > 0 ? (roi.revenue / hours).toFixed(0) : '—';
+
+      const stats = [
+        { value: tasks.length,           label: 'Total tasks' },
+        { value: status.done,            label: 'Done' },
+        { value: status.open,            label: 'Open' },
+        { value: status.in_progress,     label: 'In Progress' },
+        { value: status.blocked,         label: 'Blocked' },
+        { value: `${hours.toFixed(1)}h`, label: 'Hours' },
+        { value: `$${roiScore}/hr`,      label: 'ROI' },
+      ];
+
+      // Group tasks by phase
+      const phases = {};
+      for (const t of tasks) {
+        const k = t.phase ?? 'Unphased';
+        if (!phases[k]) phases[k] = [];
+        phases[k].push(t);
+      }
+
+      const criticalIds = new Set(cpm.nodes.filter(n => n.is_critical).map(n => n.id));
+
+      content.innerHTML = `
+        <h1>${project.name}</h1>
+        <div class="meta">${project.type} · ${project.status} · created ${project.created_at.slice(0,10)}</div>
+        <div class="stats">
+          ${stats.map(s => `<div class="stat"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('')}
+        </div>
+        ${cpm.critical_path.length > 0 ? `
+          <h2>Critical Path</h2>
+          <div class="critical-path">${cpm.critical_path.map(s => `<span class="slug">★ ${s}</span>`).join(' → ')}</div>
+        ` : ''}
+        ${Object.entries(phases).map(([phase, ptasks]) => `
+          <h2>${phase}</h2>
+          <table>
+            <thead><tr><th>Slug</th><th>Title</th><th>Status</th><th>Duration</th><th>Float</th><th>GH</th></tr></thead>
+            <tbody>
+              ${ptasks.map(t => `
+                <tr class="${criticalIds.has(t.id) ? 'critical' : ''}">
+                  <td><code>${t.slug}</code></td>
+                  <td>${t.title}</td>
+                  <td>${statusBadge(t.status)}</td>
+                  <td>${t.duration_days ?? '—'}</td>
+                  <td>${t.float_days !== null ? t.float_days.toFixed(1) : '—'}</td>
+                  <td>${t.gh_issue_number ? `<a href="https://github.com/${project.gh_repo}/issues/${t.gh_issue_number}" target="_blank">#${t.gh_issue_number}</a>` : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`).join('')}
+        <h2>ROI</h2>
+        <table>
+          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Hours invested</td><td>${hours.toFixed(1)}h</td></tr>
+            <tr><td>Revenue</td><td>$${roi.revenue.toFixed(2)} AUD</td></tr>
+            <tr><td>Cost</td><td>$${roi.cost.toFixed(2)} AUD</td></tr>
+            <tr><td>Expected (prob-adj)</td><td>$${roi.expected.toFixed(2)} AUD</td></tr>
+            <tr><td>ROI/hr</td><td>$${roiScore}/hr</td></tr>
+          </tbody>
+        </table>
+      `;
+    }
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "name": "crux",
+  "version": "0.1.0",
+  "description": "Personal project manager with CPM, ROI tracking, and local LLM routing.",
+  "type": "module",
+  "bin": {
+    "crux": "./index.ts"
+  },
+  "scripts": {
+    "test": "node --test test/unit/**/*.test.ts",
+    "test:agent": "node --test test/integration/**/*.test.ts",
+    "lint": "node --check index.ts lib/**/*.ts",
+    "format": "echo 'no formatter configured'",
+    "bundle": "node esbuild.config.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0"
+  },
+  "engines": {
+    "node": ">=25.0.0"
+  },
+  "keywords": ["project-management", "cpm", "critical-path", "mcp", "mcpb"],
+  "license": "MIT",
+  "author": {
+    "name": "sholtomaud"
+  }
+}

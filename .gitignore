@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.mcpb
+.crux/
+.crux-home/
+~/.crux/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store

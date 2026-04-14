@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>crux — ROI Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; padding: 2rem; }
+    a { color: #60a5fa; text-decoration: none; }
+    h1 { font-size: 1.4rem; color: #fff; margin-bottom: 0.25rem; }
+    h2 { font-size: 0.95rem; color: #aaa; margin: 1.5rem 0 0.75rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; color: #888; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2a2a; }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #1e1e1e; }
+    .warn { color: #f59e0b; }
+    .ok   { color: #34d399; }
+    .na   { color: #555; }
+    .signal-box { margin-top: 2rem; padding: 1rem; background: #1a1a1a; border-radius: 8px; border-left: 3px solid #f59e0b; }
+    .signal-box h2 { font-size: 0.85rem; color: #f59e0b; margin-bottom: 0.5rem; margin-top: 0; }
+    .signal-box p { font-size: 0.82rem; color: #ccc; line-height: 1.7; }
+    .loading { color: #666; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← all projects</a></p>
+  <h1>ROI Dashboard</h1>
+  <div id="content"><p class="loading">Loading…</p></div>
+
+  <script src="/app.js"></script>
+  <script>
+    const BASELINE = 150; // AUD/hr — update to match config
+
+    async function render() {
+      const content = document.getElementById('content');
+      let data;
+      try { data = await fetchJson('/api/roi'); }
+      catch (e) { content.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
+
+      const warnings = [];
+      const active = data.filter(p => p.status === 'active');
+      if (active.length > 2) warnings.push(`⚠ SPREAD: ${active.length} active projects`);
+
+      const rows = data.map(p => {
+        const roiLabel = p.roi_per_hour !== null ? `$${p.roi_per_hour.toFixed(0)}/hr` : null;
+        const roiClass = roiLabel === null ? 'na' : p.roi_per_hour < BASELINE && p.hours > 20 ? 'warn' : 'ok';
+        if (roiClass === 'warn') warnings.push(`⚠ ${p.name}: ROI ${roiLabel} vs $${BASELINE}/hr opportunity cost`);
+        return `<tr>
+          <td>${p.name}</td>
+          <td>${p.type}</td>
+          <td>${p.status}</td>
+          <td>${p.hours.toFixed(1)}h</td>
+          <td>$${p.roi.revenue.toFixed(0)}</td>
+          <td>$${p.roi.cost.toFixed(0)}</td>
+          <td class="${roiClass}">${roiLabel ?? '—'}</td>
+        </tr>`;
+      }).join('');
+
+      content.innerHTML = `
+        <table>
+          <thead><tr><th>Project</th><th>Type</th><th>Status</th><th>Hours</th><th>Revenue</th><th>Cost</th><th>ROI/hr</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${warnings.length > 0 ? `<div class="signal-box"><h2>Signals</h2>${warnings.map(w => `<p>${w}</p>`).join('')}</div>` : ''}
+      `;
+    }
+    render();
+  </script>
+</body>
+</html>

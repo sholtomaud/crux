@@ -1,0 +1,50 @@
+{
+  "manifest_version": "0.3",
+  "name": "crux",
+  "display_name": "crux — find your critical path",
+  "version": "0.1.0",
+  "description": "Personal project manager with CPM, ROI tracking, and local LLM routing. Works for code repos, articles, research, and freelance work.",
+  "long_description": "crux is a hybrid project manager: run it as a plain CLI (free, no AI), ask a local LLM for simple reasoning (free, local), or let Claude use it via MCP for heavy strategic thinking. Tracks tasks, dependencies, sessions, and ROI across all your projects in a single global SQLite database.",
+  "author": {
+    "name": "sholtomaud"
+  },
+  "license": "MIT",
+  "keywords": ["project-management", "cpm", "critical-path", "kanban", "roi", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "index.ts",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/index.ts"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=25.0.0"
+    }
+  },
+  "tools": [
+    { "name": "crux_init",            "description": "Bootstrap DB for current repo; optionally install SKILL.md" },
+    { "name": "crux_status",          "description": "Structured JSON: task counts, next unblocked tasks, blockers" },
+    { "name": "crux_overview",        "description": "All projects: status, ROI, active count, spread warning" },
+    { "name": "crux_cpm",             "description": "Run CPM forward/backward pass, return critical path + float values" },
+    { "name": "crux_task_add",        "description": "Add a task to the current project" },
+    { "name": "crux_task_update",     "description": "Mark task start/done/blocked with optional note (audit logged)" },
+    { "name": "crux_dep_add",         "description": "Add predecessor→successor dependency edge" },
+    { "name": "crux_sync",            "description": "Dry-run or apply GitHub Issues ↔ DB reconciliation" },
+    { "name": "crux_report",          "description": "Generate tasks.md, docs/status-{date}.md, or docs/adr/*.md" },
+    { "name": "crux_ready",           "description": "Release readiness go/no-go check against all phase gates" },
+    { "name": "crux_graph",           "description": "Return ASCII dependency DAG or DOT format" },
+    { "name": "crux_test_run",        "description": "Record build/test pass-fail + coverage; auto-close task if coverage target met" },
+    { "name": "crux_milestone_check", "description": "Detect phase completions → generate milestone doc + open GH issue" },
+    { "name": "crux_session_start",   "description": "Start a time-tracking session for the current project" },
+    { "name": "crux_session_end",     "description": "End session and log minutes elapsed" },
+    { "name": "crux_roi_record",      "description": "Log revenue or cost against a project" },
+    { "name": "crux_roi_report",      "description": "ROI analysis JSON: score, hours, signals" },
+    { "name": "crux_spread_check",    "description": "Active project count + focus health warning" },
+    { "name": "crux_project_add",     "description": "Register a new project of any type" },
+    { "name": "crux_project_link",    "description": "Link current repo directory to an existing project" },
+    { "name": "crux_ask",             "description": "Route a natural-language question to the local LLM with DB context injected" }
+  ]
+}
