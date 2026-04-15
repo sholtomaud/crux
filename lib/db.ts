@@ -192,25 +192,18 @@ export function insertRoi(projectId: string, kind: RoiKind, amount: number, reco
 
 export function roiSummary(projectId: string): { total: number, count: number } {
   const db = _db || openDb();
-  const row = db.prepare(`
-    SELECT SUM(amount) as total, COUNT(*) as count
-    FROM roi_records
-    WHERE project_id = ?
-  `).get(projectId) as { total: number | null, count: number } | undefined;
+  const row = db.prepare('SELECT SUM(amount) as total, COUNT(*) as count FROM roi_records WHERE project_id = ?').get(projectId) as { total: number | null, count: number } | undefined;
   return { total: row?.total || 0, count: row?.count || 0 };
 }
 
 export function totalHours(projectId: string): number {
   const db = _db || openDb();
-  const row = db.prepare(`
-    SELECT SUM(duration_minutes) / 60.0 as total
-    FROM sessions
-    WHERE project_id = ?
-  `).get(projectId) as { total: number | null } | undefined;
-  return row?.total || 0;
+  const row = db.prepare('SELECT COALESCE(SUM(duration_minutes), 0) as total FROM sessions WHERE project_id = ?').get(projectId) as { total: number } | undefined;
+  return (row?.total || 0) / 60;
 }
 
 export function firstRevenueAt(db: DatabaseSync, projectId: string): string | null {
   const row = db.prepare(`
     SELECT MIN(recorded_at) as first_revenue_at
-    FROM
+    FROM roi_records
+    WHERE project_id = ? AND kind = '
