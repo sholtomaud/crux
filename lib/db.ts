@@ -177,7 +177,7 @@ export function endSession(sessionId: string): void {
 export function activeSession(projectId: string): string | null {
   const db = _db || openDb();
   const row = db.prepare('SELECT id FROM sessions WHERE project_id = ? AND ended_at IS NULL').get(projectId) as { id: string } | undefined;
-  return row?.id || null;
+  return row ? row.id : null;
 }
 
 export function insertRoi(projectId: string, kind: RoiKind, amount: number, recorded_at: string): string {
@@ -212,4 +212,4 @@ export function totalHours(projectId: string): number {
 
 export function firstRevenueAt(db: DatabaseSync, projectId: string): string | null {
   const row = db.prepare(`
-    SELECT MIN(recorded_at) as first_revenue
+    SELECT MIN(recorded_at) as first_re
