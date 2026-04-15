@@ -203,13 +203,14 @@ export function roiSummary(projectId: string): { total: number, count: number } 
 export function totalHours(projectId: string): number {
   const db = _db || openDb();
   const row = db.prepare(`
-    SELECT COALESCE(SUM(duration_minutes), 0) as total
+    SELECT SUM(duration_minutes) as total
     FROM sessions
     WHERE project_id = ?
-  `).get(projectId) as { total: number } | undefined;
+  `).get(projectId) as { total: number | null } | undefined;
   return (row?.total || 0) / 60;
 }
 
 export function firstRevenueAt(db: DatabaseSync, projectId: string): string | null {
   const row = db.prepare(`
-    SELECT MIN(recorded_at) as first_re
+    SELECT MIN(recorded_at) as first_revenue_at
+    FROM
