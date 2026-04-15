@@ -176,7 +176,10 @@ export function endSession(sessionId: string): void {
 
 export function activeSession(projectId: string): string | null {
   const db = _db || openDb();
-  const row = db.prepare('SELECT id FROM sessions WHERE project_id = ? AND ended_at IS NULL').get(projectId) as { id: string } | undefined;
+  const row = db.prepare(`
+    SELECT id FROM sessions
+    WHERE project_id = ? AND ended_at IS NULL
+  `).get(projectId) as { id: string } | undefined;
   return row ? row.id : null;
 }
 
@@ -192,18 +195,23 @@ export function insertRoi(projectId: string, kind: RoiKind, amount: number, reco
 
 export function roiSummary(projectId: string): { total: number, count: number } {
   const db = _db || openDb();
-  const row = db.prepare('SELECT SUM(amount) as total, COUNT(*) as count FROM roi_records WHERE project_id = ?').get(projectId) as { total: number | null, count: number } | undefined;
+  const row = db.prepare(`
+    SELECT SUM(amount) as total, COUNT(*) as count
+    FROM roi_records
+    WHERE project_id = ?
+  `).get(projectId) as { total: number | null, count: number } | undefined;
   return { total: row?.total || 0, count: row?.count || 0 };
 }
 
 export function totalHours(projectId: string): number {
   const db = _db || openDb();
-  const row = db.prepare('SELECT COALESCE(SUM(duration_minutes), 0) as total FROM sessions WHERE project_id = ?').get(projectId) as { total: number } | undefined;
-  return (row?.total || 0) / 60;
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(duration_minutes), 0) as total_minutes
+    FROM sessions
+    WHERE project_id = ?
+  `).get(projectId) as { total_minutes: number } | undefined;
+  return (row?.total_minutes || 0) / 60;
 }
 
 export function firstRevenueAt(db: DatabaseSync, projectId: string): string | null {
   const row = db.prepare(`
-    SELECT MIN(recorded_at) as first_revenue_at
-    FROM roi_records
-    WHERE project_id = ? AND kind = '
