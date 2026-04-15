@@ -69,7 +69,7 @@ describe('firstRevenueAt', () => {
   test('returns null for non-existent project', () => {
     const db = makeDb();
     const nonExistentId = 'non-existent-project-id';
-
+    
     const result = firstRevenueAt(db, nonExistentId);
     assert.equal(result, null);
   });
