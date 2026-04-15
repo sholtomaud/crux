@@ -33,8 +33,8 @@ describe('firstRevenueAt', () => {
     db.prepare('INSERT INTO projects (id, name, type, status, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').run(projectId, 'Test Project', 'startup', 'active');
 
     // Insert non-revenue ROI records
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'cost', 100, '2024-01-01');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'investment', 500, '2024-01-02');
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'cost', 100, '2024-01-01T00:00:00Z');
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'investment', 500, '2024-01-02T00:00:00Z');
 
     const result = firstRevenueAt(db, projectId);
     assert.equal(result, null);
@@ -45,26 +45,26 @@ describe('firstRevenueAt', () => {
     const projectId = 'test-project-3';
     db.prepare('INSERT INTO projects (id, name, type, status, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').run(projectId, 'Test Project', 'startup', 'active');
 
-    // Insert revenue records with non-positive amounts
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 0, '2024-01-01');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', -50, '2024-01-02');
+    // Insert revenue records with amount <= 0
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 0, '2024-01-01T00:00:00Z');
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', -100, '2024-01-02T00:00:00Z');
 
     const result = firstRevenueAt(db, projectId);
     assert.equal(result, null);
   });
 
-  test('returns the earliest revenue date when positive revenue exists', () => {
+  test('returns the earliest revenue date when revenue records exist', () => {
     const db = makeDb();
     const projectId = 'test-project-4';
     db.prepare('INSERT INTO projects (id, name, type, status, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').run(projectId, 'Test Project', 'startup', 'active');
 
-    // Insert revenue records with positive amounts
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 100, '2024-03-15');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 200, '2024-01-10');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 150, '2024-02-20');
+    // Insert revenue records with different dates
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 1000, '2024-03-15T10:00:00Z');
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 500, '2024-01-10T08:30:00Z');
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 2000, '2024-02-20T14:45:00Z');
 
     const result = firstRevenueAt(db, projectId);
-    assert.equal(result, '2024-01-10');
+    assert.equal(result, '2024-01-10T08:30:00Z');
   });
 
   test('returns null for non-existent project', () => {
@@ -75,18 +75,25 @@ describe('firstRevenueAt', () => {
     assert.equal(result, null);
   });
 
-  test('handles mixed kinds with revenue being the earliest positive', () => {
+  test('handles multiple projects correctly', () => {
     const db = makeDb();
-    const projectId = 'test-project-5';
-    db.prepare('INSERT INTO projects (id, name, type, status, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').run(projectId, 'Test Project', 'startup', 'active');
+    
+    const projectId1 = 'project-1';
+    const projectId2 = 'project-2';
+    
+    db.prepare('INSERT INTO projects (id, name, type, status, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').run(projectId1, 'Project 1', 'startup', 'active');
+    db.prepare('INSERT INTO projects (id, name, type, status, created_at) VALUES (?, ?, ?, ?, datetime(\'now\'))').run(projectId2, 'Project 2', 'startup', 'active');
 
-    // Insert mixed records
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'cost', 50, '2024-01-05');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 300, '2024-01-01');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'investment', 1000, '2024-01-03');
-    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId, 'revenue', 250, '2024-01-10');
+    // Project 1 has revenue
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId1, 'revenue', 100, '2024-05-01T00:00:00Z');
+    
+    // Project 2 has no revenue
+    db.prepare('INSERT INTO roi_records (project_id, kind, amount, recorded_at) VALUES (?, ?, ?, ?)').run(projectId2, 'cost', 50, '2024-05-02T00:00:00Z');
 
-    const result = firstRevenueAt(db, projectId);
-    assert.equal(result, '2024-01-01');
+    const result1 = firstRevenueAt(db, projectId1);
+    const result2 = firstRevenueAt(db, projectId2);
+
+    assert.equal(result1, '2024-05-01T00:00:00Z');
+    assert.equal(result2, null);
   });
 });
