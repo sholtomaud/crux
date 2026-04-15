@@ -84,59 +84,43 @@ export function insertProject(name: string, type: ProjectType = 'startup'): stri
 
 export function projectById(id: string): Project | null {
   const db = _db || openDb();
-  const row = db.prepare(`
-    SELECT * FROM projects WHERE id = ?
-  `).get(id) as Project | undefined;
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Project | undefined;
   return row || null;
 }
 
 export function allProjects(): Project[] {
   const db = _db || openDb();
-  return db.prepare(`
-    SELECT * FROM projects ORDER BY created_at DESC
-  `).all() as Project[];
+  return db.prepare('SELECT * FROM projects').all() as Project[];
 }
 
 export function updateProjectStatus(id: string, status: ProjectStatus): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE projects SET status = ? WHERE id = ?
-  `).run(status, id);
+  db.prepare('UPDATE projects SET status = ? WHERE id = ?').run(status, id);
 }
 
 export function updateProjectGhRepo(id: string, repo: string): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE projects SET gh_repo = ? WHERE id = ?
-  `).run(repo, id);
+  db.prepare('UPDATE projects SET gh_repo = ? WHERE id = ?').run(repo, id);
 }
 
 export function updateTaskGhIssue(taskId: string, issue: string): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE tasks SET gh_issue = ? WHERE id = ?
-  `).run(issue, taskId);
+  db.prepare('UPDATE tasks SET gh_issue = ? WHERE id = ?').run(issue, taskId);
 }
 
 export function updateTaskValueScore(taskId: string, score: number): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE tasks SET value_score = ? WHERE id = ?
-  `).run(score, taskId);
+  db.prepare('UPDATE tasks SET value_score = ? WHERE id = ?').run(score, taskId);
 }
 
 export function tasksByProject(projectId: string): Task[] {
   const db = _db || openDb();
-  return db.prepare(`
-    SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at ASC
-  `).all(projectId) as Task[];
+  return db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at').all(projectId) as Task[];
 }
 
 export function taskBySlug(projectId: string, slug: string): Task | null {
   const db = _db || openDb();
-  const row = db.prepare(`
-    SELECT * FROM tasks WHERE project_id = ? AND slug = ?
-  `).get(projectId, slug) as Task | undefined;
+  const row = db.prepare('SELECT * FROM tasks WHERE project_id = ? AND slug = ?').get(projectId, slug) as Task | undefined;
   return row || null;
 }
 
@@ -152,30 +136,26 @@ export function insertTask(projectId: string, slug: string, title: string, type:
 
 export function updateTaskStatus(taskId: string, status: TaskStatus): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE tasks SET status = ? WHERE id = ?
-  `).run(status, taskId);
+  db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run(status, taskId);
 }
 
 export function updateTaskCpm(taskId: string, cpm: number): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE tasks SET cpm = ? WHERE id = ?
-  `).run(cpm, taskId);
+  db.prepare('UPDATE tasks SET cpm = ? WHERE id = ?').run(cpm, taskId);
 }
 
 export function addDependency(taskId: string, dependsOnId: string): void {
   const db = _db || openDb();
-  db.prepare(`
-    INSERT OR IGNORE INTO dependencies (task_id, depends_on_id)
-    VALUES (?, ?)
-  `).run(taskId, dependsOnId);
+  db.prepare('INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?, ?)').run(taskId, dependsOnId);
 }
 
 export function dependenciesByProject(projectId: string): { task_id: string, depends_on_id: string }[] {
   const db = _db || openDb();
   return db.prepare(`
-    SELECT * FROM dependencies WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)
+    SELECT td.task_id, td.depends_on_id
+    FROM task_dependencies td
+    JOIN tasks t ON td.task_id = t.id
+    WHERE t.project_id = ?
   `).all(projectId) as { task_id: string, depends_on_id: string }[];
 }
 
@@ -191,16 +171,12 @@ export function startSession(projectId: string): string {
 
 export function endSession(sessionId: string): void {
   const db = _db || openDb();
-  db.prepare(`
-    UPDATE sessions SET ended_at = datetime('now') WHERE id = ?
-  `).run(sessionId);
+  db.prepare('UPDATE sessions SET ended_at = datetime(\'now\') WHERE id = ?').run(sessionId);
 }
 
 export function activeSession(projectId: string): string | null {
   const db = _db || openDb();
-  const row = db.prepare(`
-    SELECT id FROM sessions WHERE project_id = ? AND ended_at IS NULL
-  `).get(projectId) as { id: string } | undefined;
+  const row = db.prepare('SELECT id FROM sessions WHERE project_id = ? AND ended_at IS NULL').get(projectId) as { id: string } | undefined;
   return row ? row.id : null;
 }
 
@@ -217,7 +193,9 @@ export function insertRoi(projectId: string, kind: RoiKind, amount: number, reco
 export function roiSummary(projectId: string): { total: number, count: number } {
   const db = _db || openDb();
   const row = db.prepare(`
-    SELECT SUM(amount) as total, COUNT(*) as count FROM roi_records WHERE project_id = ?
+    SELECT SUM(amount) as total, COUNT(*) as count
+    FROM roi_records
+    WHERE project_id = ?
   `).get(projectId) as { total: number | null, count: number } | undefined;
   return { total: row?.total || 0, count: row?.count || 0 };
 }
@@ -225,6 +203,14 @@ export function roiSummary(projectId: string): { total: number, count: number } 
 export function totalHours(projectId: string): number {
   const db = _db || openDb();
   const row = db.prepare(`
-    SELECT SUM(duration) as total FROM sessions WHERE project_id = ? AND ended_at IS NOT NULL
+    SELECT SUM(duration_minutes) / 60.0 as total
+    FROM sessions
+    WHERE project_id = ?
   `).get(projectId) as { total: number | null } | undefined;
-  return row?.total ||
+  return row?.total || 0;
+}
+
+export function firstRevenueAt(db: DatabaseSync, projectId: string): string | null {
+  const row = db.prepare(`
+    SELECT MIN(recorded_at) as first_revenue_at
+    FROM
