@@ -146,15 +146,15 @@ export function updateTaskCpm(taskId: string, cpm: number): void {
 
 export function addDependency(taskId: string, dependsOnId: string): void {
   const db = _db || openDb();
-  db.prepare('INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?, ?)').run(taskId, dependsOnId);
+  db.prepare('INSERT OR IGNORE INTO dependencies (task_id, depends_on_id) VALUES (?, ?)').run(taskId, dependsOnId);
 }
 
 export function dependenciesByProject(projectId: string): { task_id: string, depends_on_id: string }[] {
   const db = _db || openDb();
   return db.prepare(`
-    SELECT td.task_id, td.depends_on_id
-    FROM task_dependencies td
-    JOIN tasks t ON td.task_id = t.id
+    SELECT d.task_id, d.depends_on_id
+    FROM dependencies d
+    JOIN tasks t ON d.task_id = t.id
     WHERE t.project_id = ?
   `).all(projectId) as { task_id: string, depends_on_id: string }[];
 }
@@ -198,7 +198,7 @@ export function roiSummary(projectId: string): { total: number, count: number } 
 
 export function totalHours(projectId: string): number {
   const db = _db || openDb();
-  const row = db.prepare('SELECT SUM(duration_minutes) as total FROM session_hours WHERE project_id = ?').get(projectId) as { total: number | null } | undefined;
+  const row = db.prepare('SELECT SUM(duration_minutes) as total FROM sessions WHERE project_id = ?').get(projectId) as { total: number | null } | undefined;
   return (row?.total || 0) / 60;
 }
 
@@ -206,4 +206,4 @@ export function firstRevenueAt(db: DatabaseSync, projectId: string): string | nu
   const row = db.prepare(`
     SELECT MIN(recorded_at) as first_revenue_at
     FROM roi_records
-    WHERE project_id = ? AND kind = 'revenue' AND
+    WHERE project_id = ? AND kind = 'revenue' AND amount
