@@ -14,12 +14,13 @@ import { spawnSync } from 'node:child_process';
 
 import {
   openDb, closeDb, findRepoRoot, readProjectPointer, writeProjectPointer,
-  resolveProject, insertProject, projectById, allProjects, updateProjectStatus,
+  resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore,
   tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskCpm,
   addDependency, dependenciesByProject,
   startSession, endSession, activeSession,
   insertRoi, roiSummary, totalHours,
-  insertTestRun, logAudit, projectStatus,
+  insertTestRun, logAudit, recentAudit, projectStatus,
+  insertAdr, listAdrs,
 } from './lib/db.ts';
 import type { Project, ProjectType, TaskStatus } from './lib/db.ts';
 
@@ -31,6 +32,7 @@ import { ask }    from './lib/ask.ts';
 import { exportCsv, syncToSheets } from './lib/sheets.ts';
 import { startServer } from './lib/server.ts';
 import { syncTasks } from './lib/gh.ts';
+import { runAgent } from './lib/agent.ts';
 
 // ── Mode detection ─────────────────────────────────────────────────────────────
 // CLI: args present, or stdin is a TTY
@@ -75,6 +77,8 @@ async function runCli(args: string[]): Promise<void> {
     case 'project':        return cmdProject(rest);
     case 'export':         return cmdExport(rest);
     case 'ask':            return cmdAsk(rest);
+    case 'context':        return cmdContext();
+    case 'agent':          return cmdAgent(rest);
     case 'ui':             return cmdUi(rest);
     default:
       console.error(`Unknown command: ${cmd}\nRun crux --help for usage.`);
@@ -155,6 +159,11 @@ AUTOMATION
 OTHER
   export [--csv]                 Export project data to CSV
   ask "<question>"               Ask local LLM with project context
+  context                        Full project snapshot as JSON (for agent orientation)
+  agent --task <slug>            Run local LLM agent on a single task
+    [--dry-run] [--max-iter N]
+  agent --run-all                Run agent on all unblocked tasks in WSJF order
+    [--phase <phase>] [--dry-run] [--max-iter N]
   ui [--port 8765] [--no-open]   Start browser UI
 
 Tier 1 (CLI, free) → Tier 2 (crux ask, local LLM) → Tier 3 (Claude via MCP)
@@ -308,7 +317,7 @@ function cmdCpm(): void {
   const proj = getProject();
   const tasks = tasksByProject(db, proj.id);
   const deps  = dependenciesByProject(db, proj.id);
-  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase }));
+  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
   const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
 
   const result = computeCpm(nodes, edges);
@@ -340,7 +349,7 @@ function cmdGraph(args: string[]): void {
   const proj = getProject();
   const tasks = tasksByProject(db, proj.id);
   const deps  = dependenciesByProject(db, proj.id);
-  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase }));
+  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
   const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
 
   let cpmNodes;
@@ -487,11 +496,34 @@ function cmdReport(args: string[]): void {
   }
 
   if (sub === 'adrs') {
-    const adrs = db.prepare('SELECT id FROM adrs WHERE project_id = ?').all(proj.id) as Array<{ id: number }>;
+    const adrs = listAdrs(db, proj.id);
     if (adrs.length === 0) { console.log('No ADRs to generate.'); return; }
     mkdirSync(join('docs', 'adr'), { recursive: true });
-    // ADR report is handled per-record
-    console.log(`(${adrs.length} ADRs — use crux report adrs to generate individually)`);
+    for (const adr of adrs) {
+      const slug = adr.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const filename = `ADR-${String(adr.number).padStart(3, '0')}-${slug}.md`;
+      const path = join('docs', 'adr', filename);
+      const md = [
+        `# ADR-${String(adr.number).padStart(3, '0')}: ${adr.title}`,
+        ``,
+        `**Status:** ${adr.status}  `,
+        `**Date:** ${adr.created_at.slice(0, 10)}`,
+        ``,
+        `## Context`,
+        ``,
+        adr.context ?? '_Not recorded._',
+        ``,
+        `## Decision`,
+        ``,
+        adr.decision ?? '_Not recorded._',
+        ``,
+        `## Consequences`,
+        ``,
+        adr.consequences ?? '_Not recorded._',
+      ].join('\n');
+      writeFileSync(path, md);
+      console.log(`✓ ${path}`);
+    }
     return;
   }
 
@@ -517,6 +549,15 @@ async function cmdSync(args: string[]): Promise<void> {
   const actions = syncTasks(proj.gh_repo, tasks.map(t => ({
     id: t.id, slug: t.slug, title: t.title, status: t.status, gh_issue_number: t.gh_issue_number,
   })), apply);
+
+  if (apply) {
+    for (const action of actions) {
+      if (action.action === 'create' && action.issue_number != null) {
+        const task = tasks.find(t => t.slug === action.task_slug);
+        if (task) updateTaskGhIssue(db, task.id, action.issue_number);
+      }
+    }
+  }
 
   for (const a of actions) {
     const num = a.issue_number ? ` #${a.issue_number}` : '';
@@ -604,7 +645,8 @@ async function cmdProject(args: string[]): Promise<void> {
   }
 
   if (sub === 'link') {
-    const root = findRepoRoot() ?? process.cwd();
+    const root   = findRepoRoot() ?? process.cwd();
+    const ghRepo = flag(args, '--gh-repo');
     const projects = allProjects(db);
     if (projects.length === 0) { console.error('No projects found. Run: crux project add <name>'); process.exit(1); }
     console.log('Available projects:');
@@ -615,7 +657,8 @@ async function cmdProject(args: string[]): Promise<void> {
     const proj = projects[parseInt(ans) - 1];
     if (!proj) { console.error('Invalid selection'); process.exit(1); }
     writeProjectPointer(root, proj.id);
-    console.log(`✓ Linked to ${proj.name}`);
+    if (ghRepo) updateProjectGhRepo(db, proj.id, ghRepo);
+    console.log(`✓ Linked to ${proj.name}${ghRepo ? ` (gh_repo: ${ghRepo})` : ''}`);
     return;
   }
 
@@ -681,6 +724,144 @@ async function cmdAsk(args: string[]): Promise<void> {
   const proj = getProject();
   const resp = await ask(db, proj, question);
   console.log(resp);
+}
+
+// ── context ───────────────────────────────────────────────────────────────────
+
+function cmdContext(): void {
+  const db      = openDb();
+  const proj    = getProject();
+  const allTasks = tasksByProject(db, proj.id);
+  const deps     = dependenciesByProject(db, proj.id);
+  const adrs     = listAdrs(db, proj.id);
+  const audit    = recentAudit(db, proj.id, 8);
+  const status   = projectStatus(db, proj.id);
+  const slugById = new Map(allTasks.map(t => [t.id, t.slug]));
+
+  const cpmNodes: CpmNode[] = allTasks.map(t => ({
+    id: t.id, slug: t.slug, title: t.title,
+    duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score,
+  }));
+  const cpmEdges: CpmEdge[] = deps.map(d => ({
+    predecessor_id: d.predecessor_id, successor_id: d.successor_id,
+  }));
+  let cpmSummary = null;
+  try {
+    const cpm = computeCpm(cpmNodes, cpmEdges);
+    cpmSummary = { project_duration: cpm.project_duration, critical_path: cpm.critical_path, critical_count: cpm.nodes.filter(n => n.is_critical).length };
+  } catch { /* cycle */ }
+
+  const activeTasks = allTasks
+    .filter(t => t.status === 'open' || t.status === 'in-progress' || t.status === 'blocked')
+    .map(t => ({
+      id: t.id, slug: t.slug, title: t.title,
+      description:   t.description ? t.description.slice(0, 200) : null,
+      phase: t.phase, status: t.status, duration_days: t.duration_days,
+      value_score: t.value_score, is_critical: t.is_critical === 1,
+      predecessors: deps.filter(d => d.successor_id   === t.id).map(d => slugById.get(d.predecessor_id) ?? d.predecessor_id),
+      successors:   deps.filter(d => d.predecessor_id === t.id).map(d => slugById.get(d.successor_id)   ?? d.successor_id),
+    }));
+
+  const out = {
+    project:    { id: proj.id, name: proj.name, type: proj.type, status: proj.status, gh_repo: proj.gh_repo },
+    summary:    { total: allTasks.length, open: status.open, in_progress: status.in_progress, blocked: status.blocked, done: allTasks.filter(t => t.status === 'done').length, next_unblocked: status.next_unblocked, cpm: cpmSummary },
+    active_tasks: activeTasks,
+    adrs:       adrs.map(a => ({ number: a.number, title: a.title, status: a.status, decision: a.decision ? a.decision.slice(0, 300) : null })),
+    recent_audit: audit.map(e => ({ event: e.event, detail: e.detail, actor: e.actor, created_at: e.created_at })),
+  };
+  console.log(JSON.stringify(out, null, 2));
+}
+
+// ── agent ─────────────────────────────────────────────────────────────────────
+
+function nextUnblockedTasks(db: ReturnType<typeof openDb>, projId: string, phase?: string) {
+  const tasks = tasksByProject(db, projId);
+  const deps  = dependenciesByProject(db, projId);
+  const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
+
+  return tasks
+    .filter(t => {
+      if (t.status !== 'open') return false;
+      if (phase && t.phase !== phase) return false;
+      const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
+      return preds.every(id => doneIds.has(id));
+    })
+    .sort((a, b) => {
+      const wsjfA = (a.value_score ?? 0) / (a.duration_days ?? 1);
+      const wsjfB = (b.value_score ?? 0) / (b.duration_days ?? 1);
+      return wsjfB - wsjfA;
+    });
+}
+
+async function cmdAgent(args: string[]): Promise<void> {
+  const taskSlug   = flag(args, '--task');
+  const runAll     = hasFlag(args, '--run-all');
+  const phase      = flag(args, '--phase') ?? undefined;
+  const dryRun     = hasFlag(args, '--dry-run');
+  const maxIterStr = flag(args, '--max-iter');
+  const ctxStr     = flag(args, '--ctx-tokens');
+  const maxIter    = maxIterStr ? parseInt(maxIterStr, 10) : undefined;
+  const ctxTokens  = ctxStr    ? parseInt(ctxStr,     10) : undefined;
+
+  if (!taskSlug && !runAll) {
+    console.error('Usage:\n  crux agent --task <slug> [--dry-run] [--max-iter N] [--ctx-tokens N]\n  crux agent --run-all [--phase <phase>] [--dry-run] [--max-iter N] [--ctx-tokens N]');
+    process.exit(1);
+  }
+
+  const db   = openDb();
+  const proj = getProject();
+
+  if (taskSlug) {
+    const result = await runAgent(db, proj, taskSlug, { dryRun, maxIter, ctxTokens });
+    if (result.completed) {
+      console.log(`✓ done: ${taskSlug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+    } else if (result.blocked) {
+      console.log(`⊘ blocked: ${taskSlug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+      process.exit(2);
+    } else {
+      console.log(`⚠ stopped after ${result.iterations} iterations`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  // --run-all: loop through unblocked tasks in WSJF order
+  let completed = 0;
+  let blocked   = 0;
+  let failed    = 0;
+
+  console.log(`crux agent --run-all${phase ? ` --phase ${phase}` : ''}\n`);
+
+  for (;;) {
+    const queue = nextUnblockedTasks(db, proj.id, phase);
+    if (queue.length === 0) {
+      console.log(`\nNo more unblocked open tasks. Done: ${completed}, Blocked: ${blocked}, Failed: ${failed}`);
+      break;
+    }
+
+    const task = queue[0];
+    console.log(`\n→ next: ${task.slug} (${queue.length} in queue)`);
+
+    const result = await runAgent(db, proj, task.slug, { dryRun, maxIter, ctxTokens });
+
+    if (result.completed) {
+      completed++;
+      console.log(`✓ done: ${task.slug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+    } else if (result.blocked) {
+      blocked++;
+      console.log(`⊘ blocked: ${task.slug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+      // Don't stop — try the next unblocked task
+    } else {
+      failed++;
+      console.log(`⚠ agent stopped without completing: ${task.slug}`);
+      // Stop the queue — something went wrong
+      break;
+    }
+
+    if (dryRun) break; // dry-run: show first task only
+  }
+
+  if (blocked > 0 || failed > 0) process.exit(1);
 }
 
 // ── ui ────────────────────────────────────────────────────────────────────────
@@ -773,7 +954,7 @@ async function runMcpServer(): Promise<void> {
         const proj  = requireProject();
         const tasks = tasksByProject(db, proj.id);
         const deps  = dependenciesByProject(db, proj.id);
-        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase }));
+        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
         const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
         const result = computeCpm(nodes, edges);
         for (const n of result.nodes) {
@@ -785,11 +966,11 @@ async function runMcpServer(): Promise<void> {
   );
 
   server.tool('crux_task_add', 'Add a task to the current project',
-    { slug: z.string(), title: z.string(), description: z.string().optional(), phase: z.string().optional(), duration_days: z.number().optional(), coverage_target: z.number().optional() },
-    ({ slug, title, description, phase, duration_days, coverage_target }) => {
+    { slug: z.string(), title: z.string(), description: z.string().optional(), phase: z.string().optional(), duration_days: z.number().optional(), coverage_target: z.number().optional(), value_score: z.number().min(0).max(100).optional() },
+    ({ slug, title, description, phase, duration_days, coverage_target, value_score }) => {
       try {
         const proj = requireProject();
-        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, duration_days, coverage_target });
+        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, duration_days, coverage_target, value_score });
         logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.add', detail: title, actor: 'claude' });
         return ok(task);
       } catch (e: unknown) { return err((e as Error).message); }
@@ -797,15 +978,16 @@ async function runMcpServer(): Promise<void> {
   );
 
   server.tool('crux_task_update', 'Mark task start/done/blocked with optional note (audit logged)',
-    { slug: z.string(), status: z.enum(['open','in-progress','blocked','done','dropped']), note: z.string().optional() },
-    ({ slug, status, note }) => {
+    { slug: z.string(), status: z.enum(['open','in-progress','blocked','done','dropped']), note: z.string().optional(), value_score: z.number().min(0).max(100).optional() },
+    ({ slug, status, note, value_score }) => {
       try {
         const proj = requireProject();
         const task = taskBySlug(db, proj.id, slug);
         if (!task) return err(`Task not found: ${slug}`);
         updateTaskStatus(db, proj.id, slug, status);
+        if (value_score != null) updateTaskValueScore(db, task.id, value_score);
         logAudit(db, { project_id: proj.id, task_id: task.id, event: `task.${status}`, detail: note, actor: 'claude' });
-        return ok({ slug, status, note });
+        return ok({ slug, status, note, value_score: value_score ?? task.value_score });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -835,6 +1017,15 @@ async function runMcpServer(): Promise<void> {
         const actions = syncTasks(proj.gh_repo, tasks.map(t => ({
           id: t.id, slug: t.slug, title: t.title, status: t.status, gh_issue_number: t.gh_issue_number,
         })), apply);
+        // Write gh_issue_number back to DB for any newly created issues
+        if (apply) {
+          for (const action of actions) {
+            if (action.action === 'create' && action.issue_number != null) {
+              const task = tasks.find(t => t.slug === action.task_slug);
+              if (task) updateTaskGhIssue(db, task.id, action.issue_number);
+            }
+          }
+        }
         return ok({ actions, applied: apply });
       } catch (e: unknown) { return err((e as Error).message); }
     }
@@ -872,7 +1063,7 @@ async function runMcpServer(): Promise<void> {
         const proj  = requireProject();
         const tasks = tasksByProject(db, proj.id);
         const deps  = dependenciesByProject(db, proj.id);
-        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase }));
+        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
         const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
         let cpmNodes;
         try { cpmNodes = computeCpm(nodes, edges).nodes; } catch { cpmNodes = undefined; }
@@ -992,15 +1183,16 @@ async function runMcpServer(): Promise<void> {
     }
   );
 
-  server.tool('crux_project_link', 'Link current repo directory to an existing project',
-    { project_id: z.string() },
-    ({ project_id }) => {
+  server.tool('crux_project_link', 'Link a repo directory to an existing project; optionally set gh_repo',
+    { project_id: z.string(), repo_path: z.string().optional(), gh_repo: z.string().optional() },
+    ({ project_id, repo_path, gh_repo }) => {
       try {
-        const root = findRepoRoot() ?? process.cwd();
+        const root = repo_path ?? findRepoRoot() ?? process.cwd();
         const proj = projectById(db, project_id);
         if (!proj) return err(`Project not found: ${project_id}`);
         writeProjectPointer(root, project_id);
-        return ok({ linked: true, project: proj });
+        if (gh_repo) updateProjectGhRepo(db, project_id, gh_repo);
+        return ok({ linked: true, project: projectById(db, project_id) });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -1012,6 +1204,122 @@ async function runMcpServer(): Promise<void> {
         const proj = requireProject();
         const answer = await ask(db, proj, question);
         return ok({ question, answer });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  // ── Project context (agent orientation) ───────────────────────────────────
+  server.tool('crux_project_context',
+    'Full project snapshot for agent orientation: metadata, open tasks with deps, ADRs, CPM summary, recent audit. One call gives a coding agent everything needed to pick up work.',
+    {},
+    () => {
+      try {
+        const proj = requireProject();
+        const allTasks = tasksByProject(db, proj.id);
+        const deps     = dependenciesByProject(db, proj.id);
+        const adrs     = listAdrs(db, proj.id);
+        const audit    = recentAudit(db, proj.id, 8);
+        const status   = projectStatus(db, proj.id);
+
+        // Slug lookup maps for dep resolution
+        const slugById = new Map(allTasks.map(t => [t.id, t.slug]));
+
+        // CPM summary
+        const cpmNodes: CpmNode[] = allTasks.map(t => ({
+          id: t.id, slug: t.slug, title: t.title,
+          duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score,
+        }));
+        const cpmEdges: CpmEdge[] = deps.map(d => ({
+          predecessor_id: d.predecessor_id, successor_id: d.successor_id,
+        }));
+        let cpmSummary: { project_duration: number; critical_path: string[]; critical_count: number } | null = null;
+        try {
+          const cpm = computeCpm(cpmNodes, cpmEdges);
+          cpmSummary = {
+            project_duration: cpm.project_duration,
+            critical_path:    cpm.critical_path,
+            critical_count:   cpm.nodes.filter(n => n.is_critical).length,
+          };
+        } catch { /* cycle or empty — skip */ }
+
+        // Open + in-progress tasks with predecessor/successor slugs and truncated description
+        const activeTasks = allTasks
+          .filter(t => t.status === 'open' || t.status === 'in-progress' || t.status === 'blocked')
+          .map(t => ({
+            id:            t.id,
+            slug:          t.slug,
+            title:         t.title,
+            description:   t.description ? t.description.slice(0, 200) : null,
+            phase:         t.phase,
+            status:        t.status,
+            duration_days: t.duration_days,
+            value_score:   t.value_score,
+            is_critical:   t.is_critical === 1,
+            predecessors:  deps.filter(d => d.successor_id   === t.id).map(d => slugById.get(d.predecessor_id) ?? d.predecessor_id),
+            successors:    deps.filter(d => d.predecessor_id === t.id).map(d => slugById.get(d.successor_id)   ?? d.successor_id),
+          }));
+
+        return ok({
+          project: {
+            id:          proj.id,
+            name:        proj.name,
+            type:        proj.type,
+            status:      proj.status,
+            gh_repo:     proj.gh_repo,
+          },
+          summary: {
+            total:           allTasks.length,
+            open:            status.open,
+            in_progress:     status.in_progress,
+            blocked:         status.blocked,
+            done:            allTasks.filter(t => t.status === 'done').length,
+            next_unblocked:  status.next_unblocked,
+            cpm:             cpmSummary,
+          },
+          active_tasks: activeTasks,
+          adrs: adrs.map(a => ({
+            number:   a.number,
+            title:    a.title,
+            status:   a.status,
+            decision: a.decision ? a.decision.slice(0, 300) : null,
+          })),
+          recent_audit: audit.map(e => ({
+            event:      e.event,
+            detail:     e.detail,
+            actor:      e.actor,
+            created_at: e.created_at,
+          })),
+        });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  // ── ADR tools ─────────────────────────────────────────────────────────────
+  server.tool('crux_adr_add', 'Add an Architecture Decision Record to the current project',
+    {
+      title:        z.string(),
+      context:      z.string().optional().describe('The situation and forces that led to this decision'),
+      decision:     z.string().optional().describe('The decision made and rationale'),
+      consequences: z.string().optional().describe('Resulting context, trade-offs, and follow-up actions'),
+      status:       z.enum(['proposed', 'accepted', 'deprecated', 'superseded']).optional(),
+    },
+    ({ title, context, decision, consequences, status }) => {
+      try {
+        const proj = requireProject();
+        const adr = insertAdr(db, { project_id: proj.id, title, context, decision, consequences, status });
+        logAudit(db, { project_id: proj.id, event: 'adr_add', detail: `ADR-${adr.number}: ${title}`, actor: 'claude' });
+        return ok(adr);
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  server.tool('crux_adr_list', 'List all ADRs for the current project',
+    {},
+    () => {
+      try {
+        const proj = requireProject();
+        const adrs = listAdrs(db, proj.id);
+        return ok({ count: adrs.length, adrs });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -1053,5 +1361,6 @@ Action: run \`crux overview\` and \`crux cpm\` first to load current state, then
 crux_init, crux_status, crux_overview, crux_cpm, crux_task_add, crux_task_update,
 crux_dep_add, crux_sync, crux_report, crux_ready, crux_graph, crux_test_run,
 crux_milestone_check, crux_session_start, crux_session_end, crux_roi_record,
-crux_roi_report, crux_spread_check, crux_project_add, crux_project_link, crux_ask
+crux_roi_report, crux_spread_check, crux_project_add, crux_project_link, crux_ask,
+crux_adr_add, crux_adr_list, crux_project_context
 `;

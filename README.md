@@ -167,10 +167,89 @@ TIER 3 — Claude   MCP tools               paid, cloud
 
 ---
 
+## Capital Model
+
+crux treats project work as a capital problem, not just a task list.
+The question it tries to answer: **"can I afford to finish this?"**
+
+### Variables
+
+| Variable | Source | Description |
+|---|---|---|
+| `duration_days` | task field | Estimated days to complete (set by human or Claude) |
+| `actual_days` | task field | Real days taken, recorded on completion |
+| `estimated_by` | task field | `'human'` or `'claude'` — who made the estimate |
+| `daily_cost` | global config / project | Your real daily operating cost (rent + food + bills + tools) |
+| `cash_on_hand` | project field | Current cash available |
+| `life_budget` | project field | Monthly living cost baseline |
+
+### Calibration factor
+
+Over time, crux tracks how accurate Claude's estimates are:
+
+```
+calibration_factor = AVG(actual_days / duration_days)
+  WHERE estimated_by = 'claude'
+  AND   actual_days  IS NOT NULL
+```
+
+Starts at 1.0. Self-corrects as more tasks are completed. If Claude consistently
+overestimates by 2×, future capital forecasts are adjusted automatically.
+
+### Capital required
+
+```
+capital_required =
+  SUM over (open + in-progress tasks):
+    duration_days × calibration_factor × daily_cost
+```
+
+### Capital spent (actual)
+
+```
+capital_spent =
+  SUM over (done tasks):
+    COALESCE(actual_days, duration_days) × daily_cost
+```
+
+### Runway
+
+```
+monthly_burn  = SUM(roi_records WHERE kind='cost', rolling 30 days) + life_budget
+runway_weeks  = cash_on_hand / (monthly_burn / 4.33)
+```
+
+RAG thresholds: **green** > 12 weeks · **amber** 4–12 weeks · **red** < 4 weeks.
+
+When runway < 4 weeks, crux surfaces a `CRITICAL` warning in every tool response
+(algedonic signal — bypasses task priority hierarchy).
+
+### Your role in the model
+
+You are not free overhead. The orchestrator — ideas, direction, quality gate — has a
+real daily cost. `daily_cost` models this explicitly:
+
+```
+cost_of_your_time = days_to_ship × daily_cost
+cost_of_claude    = logged as roi_records (kind='cost') per billing period
+total_project_cost = cost_of_your_time + cost_of_claude + other costs
+```
+
+### Time to first dollar
+
+```
+time_to_first_dollar = MIN(recorded_at) WHERE kind='revenue' AND amount > 0
+  — per project
+```
+
+The key viability question for any new idea: how long until it generates its first
+revenue, and can you fund yourself until then?
+
+---
+
 ## Database
 
 Global DB at `~/.crux/crux.db` (SQLite, WAL mode).
 Per-repo pointer at `.crux/project.json`.
 
 Schema: `projects`, `tasks`, `dependencies`, `sessions`, `roi_records`, `test_runs`, `adrs`, `task_adrs`, `audit`.
-# crux

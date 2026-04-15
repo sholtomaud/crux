@@ -56,6 +56,7 @@ export interface Task {
   is_critical: number;
   gh_issue_number: number | null;
   coverage_target: number | null;
+  value_score: number | null;
   created_at: string;
 }
 
@@ -110,12 +111,20 @@ export function openDb(): DatabaseSync {
   mkdirSync(CRUX_DIR, { recursive: true });
   _db = new DatabaseSync(DB_PATH);
   applySchema(_db);
+  applyMigrations(_db);
   return _db;
 }
 
 function applySchema(db: DatabaseSync): void {
   for (const stmt of SCHEMA_SQL.split(';').map((s: string) => s.trim()).filter(Boolean)) {
     db.exec(stmt + ';');
+  }
+}
+
+function applyMigrations(db: DatabaseSync): void {
+  const cols = (db.prepare(`PRAGMA table_info(tasks)`).all() as Array<{ name: string }>).map(r => r.name);
+  if (!cols.includes('value_score')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN value_score REAL;');
   }
 }
 
@@ -186,6 +195,10 @@ export function updateProjectStatus(db: DatabaseSync, id: string, status: Projec
   db.prepare('UPDATE projects SET status = ? WHERE id = ?').run(status, id);
 }
 
+export function updateProjectGhRepo(db: DatabaseSync, id: string, ghRepo: string): void {
+  db.prepare('UPDATE projects SET gh_repo = ? WHERE id = ?').run(ghRepo, id);
+}
+
 // ── Tasks ──────────────────────────────────────────────────────────────────────
 
 export function tasksByProject(db: DatabaseSync, projectId: string): Task[] {
@@ -207,11 +220,12 @@ export function insertTask(
     priority?: number;
     duration_days?: number;
     coverage_target?: number;
+    value_score?: number;
   }
 ): Task {
   db.prepare(`
-    INSERT INTO tasks (project_id, slug, title, description, phase, priority, duration_days, coverage_target)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (project_id, slug, title, description, phase, priority, duration_days, coverage_target, value_score)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     opts.project_id,
     opts.slug,
@@ -221,8 +235,13 @@ export function insertTask(
     opts.priority ?? 0,
     opts.duration_days ?? null,
     opts.coverage_target ?? null,
+    opts.value_score ?? null,
   );
   return taskBySlug(db, opts.project_id, opts.slug)!;
+}
+
+export function updateTaskValueScore(db: DatabaseSync, taskId: number, valueScore: number): void {
+  db.prepare('UPDATE tasks SET value_score = ? WHERE id = ?').run(valueScore, taskId);
 }
 
 export function updateTaskStatus(
@@ -232,6 +251,10 @@ export function updateTaskStatus(
   status: TaskStatus,
 ): void {
   db.prepare('UPDATE tasks SET status = ? WHERE project_id = ? AND slug = ?').run(status, projectId, slug);
+}
+
+export function updateTaskGhIssue(db: DatabaseSync, taskId: number, ghIssueNumber: number): void {
+  db.prepare('UPDATE tasks SET gh_issue_number = ? WHERE id = ?').run(ghIssueNumber, taskId);
 }
 
 export function updateTaskCpm(
@@ -392,6 +415,44 @@ export function recentAudit(db: DatabaseSync, projectId: string, limit = 20): Au
   return db.prepare('SELECT * FROM audit WHERE project_id = ? ORDER BY created_at DESC LIMIT ?').all(projectId, limit) as AuditEntry[];
 }
 
+// ── ADRs ──────────────────────────────────────────────────────────────────────
+
+export interface Adr {
+  id: number;
+  project_id: string;
+  number: number;
+  title: string;
+  status: 'proposed' | 'accepted' | 'deprecated' | 'superseded';
+  context: string | null;
+  decision: string | null;
+  consequences: string | null;
+  created_at: string;
+}
+
+export function insertAdr(
+  db: DatabaseSync,
+  opts: { project_id: string; title: string; context?: string; decision?: string; consequences?: string; status?: Adr['status'] }
+): Adr {
+  const next = (db.prepare('SELECT COALESCE(MAX(number),0)+1 AS n FROM adrs WHERE project_id = ?').get(opts.project_id) as { n: number }).n;
+  db.prepare(`
+    INSERT INTO adrs (project_id, number, title, status, context, decision, consequences)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    opts.project_id,
+    next,
+    opts.title,
+    opts.status ?? 'accepted',
+    opts.context ?? null,
+    opts.decision ?? null,
+    opts.consequences ?? null,
+  );
+  return db.prepare('SELECT * FROM adrs WHERE project_id = ? AND number = ?').get(opts.project_id, next) as Adr;
+}
+
+export function listAdrs(db: DatabaseSync, projectId: string): Adr[] {
+  return db.prepare('SELECT * FROM adrs WHERE project_id = ? ORDER BY number').all(projectId) as Adr[];
+}
+
 // ── Status query (for crux status / crux_status) ──────────────────────────────
 
 export function projectStatus(db: DatabaseSync, projectId: string) {
@@ -418,7 +479,7 @@ export function projectStatus(db: DatabaseSync, projectId: string) {
     in_progress:   inProgress.length,
     blocked:       blocked.length,
     done:          done.length,
-    next_unblocked: nextUnblocked.slice(0, 5).map(t => ({ slug: t.slug, title: t.title, phase: t.phase })),
+    next_unblocked: nextUnblocked.slice(0, 10).map(t => ({ slug: t.slug, title: t.title, phase: t.phase })),
     blockers:      blocked.map(t => ({ slug: t.slug, title: t.title })),
   };
 }

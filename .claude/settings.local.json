@@ -6,7 +6,13 @@
       "Bash(container run:*)",
       "mcp__crux__crux_overview",
       "mcp__crux__crux_task_update",
-      "mcp__crux__crux_status"
+      "mcp__crux__crux_status",
+      "mcp__crux__crux_task_add",
+      "mcp__crux__crux_dep_add",
+      "mcp__crux__crux_adr_add",
+      "mcp__crux__crux_adr_list",
+      "Bash(crux report *)",
+      "mcp__crux__crux_project_context"
     ]
   }
 }

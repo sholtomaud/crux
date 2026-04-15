@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- integrations
     gh_issue_number  INTEGER,
     coverage_target  REAL,           -- auto-close when test_run.coverage >= this
+    value_score      REAL,           -- business value 0-100, wsjf = value_score / duration_days
     created_at       TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(project_id, slug)
 );

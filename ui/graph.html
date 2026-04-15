@@ -3,100 +3,419 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>crux — Dependency Graph</title>
+  <title>crux — CPM Graph</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; padding: 2rem; }
-    a { color: #60a5fa; text-decoration: none; }
-    h1 { font-size: 1.4rem; color: #fff; margin-bottom: 1.5rem; }
-    #graph-container { overflow: auto; }
-    svg { max-width: 100%; }
-    .loading { color: #666; }
-    /* Dagre-d3 nodes */
-    .node rect { fill: #252525; stroke: #444; rx: 6; }
-    .node.critical rect { fill: #3a1a1a; stroke: #f87171; }
-    .node text { fill: #e0e0e0; font-family: monospace; font-size: 12px; }
-    .edgePath path { stroke: #555; fill: none; stroke-width: 1.5; }
-    .edgePath.critical path { stroke: #f87171; stroke-width: 2; }
-    .legend { display: flex; gap: 1rem; font-size: 0.78rem; color: #888; margin-bottom: 1rem; }
-    .legend span { display: flex; align-items: center; gap: 0.3rem; }
-    .dot { width: 10px; height: 10px; border-radius: 2px; }
-    .dot-crit { background: #3a1a1a; border: 1px solid #f87171; }
-    .dot-norm { background: #252525; border: 1px solid #444; }
+    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    nav { padding: 0.6rem 1.2rem; border-bottom: 1px solid #1e1e1e; flex-shrink: 0; }
+    nav a { color: #60a5fa; text-decoration: none; font-size: 0.85rem; }
+
+    header { padding: 0.7rem 1.2rem 0.4rem; flex-shrink: 0; }
+    h1 { font-size: 1.15rem; color: #fff; }
+    #meta { font-size: 0.78rem; color: #666; margin-top: 0.25rem; line-height: 1.5; }
+    #critical-path { font-size: 0.75rem; color: #f87171; margin-top: 0.15rem; word-break: break-all; }
+
+    .legend { display: flex; gap: 1.2rem; padding: 0.5rem 1.2rem; font-size: 0.72rem; color: #777; border-bottom: 1px solid #1a1a1a; flex-wrap: wrap; flex-shrink: 0; }
+    .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+    .lbox { width: 11px; height: 11px; border-radius: 2px; }
+
+    #graph-wrap {
+      flex: 1;
+      overflow: hidden;
+      cursor: grab;
+      position: relative;
+      user-select: none;
+    }
+    #graph-wrap.dragging { cursor: grabbing; }
+    #graph-svg { width: 100%; height: 100%; display: block; }
+
+    #info-panel {
+      flex-shrink: 0;
+      padding: 0.6rem 1.2rem;
+      border-top: 1px solid #1e1e1e;
+      font-size: 0.78rem;
+      min-height: 52px;
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      background: #0c0c0c;
+    }
+    .ifield { display: flex; flex-direction: column; gap: 0.1rem; }
+    .ilabel { font-size: 0.65rem; color: #444; text-transform: uppercase; letter-spacing: 0.06em; }
+    .ivalue { color: #cbd5e1; }
+    .ivalue.crit { color: #f87171; }
+    .ivalue.wsjf { color: #a78bfa; }
+    .placeholder { color: #444; font-size: 0.75rem; }
   </style>
 </head>
 <body>
-  <p><a href="/">← all projects</a></p>
-  <h1>Dependency Graph</h1>
+  <nav><a href="/">← all projects</a></nav>
+  <header>
+    <h1>CPM Graph — <span id="proj-name">…</span></h1>
+    <div id="meta">Loading…</div>
+    <div id="critical-path"></div>
+  </header>
   <div class="legend">
-    <span><div class="dot dot-crit"></div> Critical path</span>
-    <span><div class="dot dot-norm"></div> Non-critical</span>
+    <span class="legend-item"><div class="lbox" style="background:#2d1212;border:1px solid #f87171"></div>Critical path</span>
+    <span class="legend-item"><div class="lbox" style="background:#151528;border:1px solid #334"></div>Non-critical</span>
+    <span class="legend-item" style="color:#a78bfa">WSJF = value ÷ duration</span>
+    <span class="legend-item">Float = slack before critical</span>
+    <span class="legend-item" style="color:#444">scroll=zoom · drag=pan · click=details</span>
   </div>
-  <div id="graph-container"><p class="loading">Loading…</p></div>
+  <div id="graph-wrap">
+    <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr"      viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 2 L9 5 L0 8z" fill="#4a4a5a"/></marker>
+        <marker id="arr-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 2 L9 5 L0 8z" fill="#f87171"/></marker>
+      </defs>
+      <g id="inner"></g>
+    </svg>
+  </div>
+  <div id="info-panel"><span class="placeholder">Click a node to see task details</span></div>
 
-  <!-- d3 + dagre-d3 via CDN (local tool, CDN is fine) -->
-  <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dagre-d3@0.6.4/dist/dagre-d3.min.js"></script>
-  <script src="/app.js"></script>
   <script>
-    const id = new URLSearchParams(location.search).get('id');
+  // ── Fetch helper ──────────────────────────────────────────────────────────────
+  async function fetchJson(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${url}`);
+    return r.json();
+  }
 
-    async function render() {
-      const container = document.getElementById('graph-container');
-      if (!id) { container.innerHTML = '<p>No project id in URL.</p>'; return; }
+  // ── Layout: column (longest-path rank) + lane (greedy row assignment) ─────────
+  function computeLayout(nodes, edges) {
+    if (!nodes.length) return { col: new Map(), lane: new Map(), numCols: 0, numLanes: 0 };
 
-      let data, cpm;
-      try {
-        [data, cpm] = await Promise.all([
-          fetchJson(`/api/project/${id}`),
-          fetchJson(`/api/cpm/${id}`),
-        ]);
-      } catch (e) { container.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
+    const preds = new Map(nodes.map(n => [n.id, []]));
+    const succs = new Map(nodes.map(n => [n.id, []]));
+    const nodeSet = new Set(nodes.map(n => n.id));
 
-      document.title = `crux — ${data.project.name} graph`;
+    for (const e of edges) {
+      if (nodeSet.has(e.predecessor_id) && nodeSet.has(e.successor_id)) {
+        preds.get(e.successor_id).push(e.predecessor_id);
+        succs.get(e.predecessor_id).push(e.successor_id);
+      }
+    }
 
-      const critIds = new Set(cpm.nodes.filter(n => n.is_critical).map(n => n.id));
-      const idToSlug = Object.fromEntries(data.tasks.map(t => [t.id, t.slug]));
-      const idToTitle = Object.fromEntries(data.tasks.map(t => [t.id, t.title]));
+    // Kahn's topological sort
+    const inDeg = new Map(nodes.map(n => [n.id, preds.get(n.id).length]));
+    const queue = nodes.filter(n => inDeg.get(n.id) === 0).map(n => n.id);
+    const order = [];
+    while (queue.length) {
+      const cur = queue.shift();
+      order.push(cur);
+      for (const s of succs.get(cur)) {
+        const d = inDeg.get(s) - 1;
+        inDeg.set(s, d);
+        if (d === 0) queue.push(s);
+      }
+    }
 
-      // Build dagre graph
-      const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: 'LR', ranksep: 60, nodesep: 30 });
+    // Column = max predecessor column + 1
+    const col = new Map();
+    for (const id of order) {
+      const ps = preds.get(id);
+      col.set(id, ps.length === 0 ? 0 : Math.max(...ps.map(p => col.get(p))) + 1);
+    }
 
-      for (const t of data.tasks) {
-        g.setNode(t.id, {
-          label: `${t.slug}\n${t.title.slice(0, 24)}`,
-          class: critIds.has(t.id) ? 'critical' : '',
-          width: 120, height: 40,
-        });
+    // Lane = greedy row, prefer first predecessor's lane
+    const lane = new Map();
+    const colUsed = new Map(); // col → Set<laneNum>
+
+    for (const id of order) {
+      const c = col.get(id);
+      if (!colUsed.has(c)) colUsed.set(c, new Set());
+      const used = colUsed.get(c);
+
+      const pl = preds.get(id).map(p => lane.get(p)).filter(x => x !== undefined);
+      // preferred = median of predecessor lanes (or 0)
+      const preferred = pl.length === 0 ? 0
+        : pl.slice().sort((a, b) => a - b)[Math.floor(pl.length / 2)];
+
+      let assigned = preferred;
+      if (used.has(assigned)) {
+        let found = false;
+        for (let d = 1; d <= nodes.length; d++) {
+          if (!used.has(preferred + d)) { assigned = preferred + d; found = true; break; }
+          if (preferred - d >= 0 && !used.has(preferred - d)) { assigned = preferred - d; found = true; break; }
+        }
+        if (!found) assigned = used.size;
+      }
+      lane.set(id, assigned);
+      used.add(assigned);
+    }
+
+    return {
+      col, lane,
+      numCols: Math.max(...col.values()) + 1,
+      numLanes: Math.max(...lane.values()) + 1,
+    };
+  }
+
+  // ── SVG rendering ─────────────────────────────────────────────────────────────
+  const COL_W  = 215;
+  const ROW_H  = 88;
+  const NODE_W = 185;
+  const NODE_H = 70;
+  const PAD    = 40;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, a = {}) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(a)) e.setAttribute(k, v);
+    return e;
+  };
+  const txt = (s, a = {}) => { const e = el('text', a); e.textContent = s; return e; };
+  const trunc = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
+
+  function renderGraph(inner, nodes, edges, cpmData, layout) {
+    inner.innerHTML = '';
+    const { col, lane } = layout;
+
+    const critSet  = new Set(cpmData.nodes.filter(n => n.is_critical).map(n => n.id));
+    const cpmById  = new Map(cpmData.nodes.map(n => [n.id, n]));
+
+    const nx = id => PAD + col.get(id) * COL_W;
+    const ny = id => PAD + lane.get(id) * ROW_H;
+    const cy = id => ny(id) + NODE_H / 2;
+
+    // ── Edges (rendered behind nodes) ───────────────────────────────────────────
+    const edgeG = el('g');
+    inner.appendChild(edgeG);
+
+    for (const e of edges) {
+      if (!col.has(e.predecessor_id) || !col.has(e.successor_id)) continue;
+      const isCrit = critSet.has(e.predecessor_id) && critSet.has(e.successor_id);
+
+      const x1 = nx(e.predecessor_id) + NODE_W;
+      const y1 = cy(e.predecessor_id);
+      const x2 = nx(e.successor_id);
+      const y2 = cy(e.successor_id);
+      const cp = Math.max(30, Math.abs(x2 - x1) * 0.45);
+
+      edgeG.appendChild(el('path', {
+        d: `M${x1} ${y1} C${x1 + cp} ${y1} ${x2 - cp} ${y2} ${x2} ${y2}`,
+        fill: 'none',
+        stroke: isCrit ? '#f87171' : '#2e2e3e',
+        'stroke-width': isCrit ? 2 : 1.5,
+        'marker-end': `url(#${isCrit ? 'arr-crit' : 'arr'})`,
+      }));
+    }
+
+    // ── Nodes ───────────────────────────────────────────────────────────────────
+    const nodeG = el('g');
+    inner.appendChild(nodeG);
+
+    for (const n of nodes) {
+      const isCrit = critSet.has(n.id);
+      const cpm    = cpmById.get(n.id);
+      const x = nx(n.id);
+      const y = ny(n.id);
+
+      const g = el('g', { class: 'node', 'data-id': n.id });
+      g.style.cursor = 'pointer';
+
+      // Background
+      g.appendChild(el('rect', {
+        x, y, width: NODE_W, height: NODE_H, rx: 8, ry: 8,
+        fill:   isCrit ? '#2d1212' : '#111122',
+        stroke: isCrit ? '#f87171' : '#2a2a3a',
+        'stroke-width': isCrit ? 1.5 : 1,
+      }));
+
+      // Left accent bar for critical
+      if (isCrit) {
+        g.appendChild(el('rect', { x, y, width: 3, height: NODE_H, rx: 2, ry: 2, fill: '#f87171' }));
       }
 
-      // Get deps from CPM edges (stored per-task)
-      const deps = await fetchJson(`/api/db/dependencies`);
-      const taskIds = new Set(data.tasks.map(t => t.id));
-      for (const d of deps) {
-        if (taskIds.has(d.predecessor_id) && taskIds.has(d.successor_id)) {
-          g.setEdge(d.predecessor_id, d.successor_id, {
-            class: critIds.has(d.predecessor_id) && critIds.has(d.successor_id) ? 'critical' : '',
-          });
+      // Slug
+      g.appendChild(txt((isCrit ? '★ ' : '○ ') + trunc(n.slug, 22), {
+        x: x + 12, y: y + 21,
+        fill: isCrit ? '#fca5a5' : '#c4cde0',
+        'font-size': 12,
+        'font-weight': 'bold',
+        'font-family': 'monospace',
+      }));
+
+      // Title
+      g.appendChild(txt(trunc(n.title, 27), {
+        x: x + 12, y: y + 36,
+        fill: '#606070',
+        'font-size': 10,
+        'font-family': 'monospace',
+      }));
+
+      // Metrics row
+      if (cpm) {
+        const parts = [];
+        if (cpm.duration    != null) parts.push(`${cpm.duration}d`);
+        if (cpm.float_days  != null && !isCrit) parts.push(`float:${cpm.float_days}`);
+        if (cpm.wsjf_score  != null) parts.push(`WSJF ${cpm.wsjf_score}`);
+        if (parts.length) {
+          g.appendChild(txt(parts.join('  ·  '), {
+            x: x + 12, y: y + 53,
+            fill: cpm.wsjf_score != null ? '#7c6aaa' : '#3a3a4a',
+            'font-size': 9.5,
+            'font-family': 'monospace',
+          }));
         }
       }
 
-      container.innerHTML = '';
-      const svg = d3.select(container).append('svg').attr('width', '100%').attr('height', 600);
-      const inner = svg.append('g');
-      const render = new dagreD3.render();
-      render(inner, g);
+      // Phase (bottom-right)
+      if (n.phase) {
+        g.appendChild(txt(trunc(n.phase, 12), {
+          x: x + NODE_W - 8, y: y + NODE_H - 7,
+          fill: '#333348',
+          'font-size': 8,
+          'font-family': 'monospace',
+          'text-anchor': 'end',
+        }));
+      }
 
-      // Auto-zoom to fit
-      const bounds = inner.node().getBBox();
-      const W = parseInt(svg.style('width'));
-      const scale = Math.min(1, (W - 40) / bounds.width);
-      svg.call(d3.zoom().on('zoom', e => inner.attr('transform', e.transform)));
-      inner.attr('transform', `translate(20,20) scale(${scale})`);
-      svg.attr('height', Math.max(600, bounds.height * scale + 40));
+      // Hover highlight (SVG inline style toggle via JS)
+      g.addEventListener('mouseenter', () => {
+        g.querySelector('rect').setAttribute('stroke', isCrit ? '#fca5a5' : '#60a5fa');
+      });
+      g.addEventListener('mouseleave', () => {
+        g.querySelector('rect').setAttribute('stroke', isCrit ? '#f87171' : '#2a2a3a');
+      });
+
+      nodeG.appendChild(g);
+    }
+  }
+
+  // ── Pan / zoom ────────────────────────────────────────────────────────────────
+  function setupPanZoom(svgEl, innerEl, contentW, contentH) {
+    let tx = 0, ty = 0, sc = 1;
+    let dragging = false, ox = 0, oy = 0;
+    const wrap = svgEl.parentElement;
+
+    const apply = () => innerEl.setAttribute('transform', `translate(${tx},${ty}) scale(${sc})`);
+
+    // Initial fit
+    const fit = () => {
+      const vw = svgEl.clientWidth  || wrap.clientWidth  || 900;
+      const vh = svgEl.clientHeight || wrap.clientHeight || 500;
+      sc = Math.min(1, (vw - 60) / contentW, (vh - 40) / contentH);
+      tx = (vw - contentW * sc) / 2;
+      ty = 20;
+      apply();
+    };
+    requestAnimationFrame(fit);
+    window.addEventListener('resize', fit);
+
+    svgEl.addEventListener('mousedown', e => {
+      dragging = true; ox = e.clientX - tx; oy = e.clientY - ty;
+      wrap.classList.add('dragging');
+    });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      tx = e.clientX - ox; ty = e.clientY - oy; apply();
+    });
+    window.addEventListener('mouseup', () => { dragging = false; wrap.classList.remove('dragging'); });
+
+    svgEl.addEventListener('wheel', e => {
+      e.preventDefault();
+      const rect = svgEl.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.15 : 0.87;
+      const newSc = Math.max(0.08, Math.min(4, sc * factor));
+      tx = mx - (mx - tx) * (newSc / sc);
+      ty = my - (my - ty) * (newSc / sc);
+      sc = newSc;
+      apply();
+    }, { passive: false });
+  }
+
+  // ── Info panel ────────────────────────────────────────────────────────────────
+  function showInfo(task, cpm, panel) {
+    const f = (label, value, cls = '') => value != null ? `
+      <div class="ifield">
+        <span class="ilabel">${label}</span>
+        <span class="ivalue ${cls}">${value}</span>
+      </div>` : '';
+
+    panel.innerHTML = [
+      f('Slug',        task.slug,                                 cpm?.is_critical ? 'crit' : ''),
+      f('Title',       task.title),
+      f('Phase',       task.phase),
+      f('Status',      task.status),
+      f('Duration',    cpm ? `${cpm.duration} days` : null),
+      f('ES / EF',     cpm ? `day ${cpm.early_start} → ${cpm.early_finish}` : null),
+      f('Float',       cpm?.float_days != null ? `${cpm.float_days}d` : null,  cpm?.is_critical ? 'crit' : ''),
+      f('Critical',    cpm?.is_critical ? '★ yes' : 'no',        cpm?.is_critical ? 'crit' : ''),
+      f('Value score', cpm?.value_score),
+      f('WSJF',        cpm?.wsjf_score,                          cpm?.wsjf_score ? 'wsjf' : ''),
+    ].join('');
+  }
+
+  // ── Main ──────────────────────────────────────────────────────────────────────
+  async function main() {
+    const projId   = new URLSearchParams(location.search).get('id');
+    const metaEl   = document.getElementById('meta');
+    const cpEl     = document.getElementById('critical-path');
+    const infoEl   = document.getElementById('info-panel');
+    const svgEl    = document.getElementById('graph-svg');
+    const innerEl  = document.getElementById('inner');
+
+    if (!projId) { metaEl.textContent = 'No project id in URL (?id=…)'; return; }
+
+    let projData, cpm, allDeps;
+    try {
+      [projData, cpm, allDeps] = await Promise.all([
+        fetchJson(`/api/project/${projId}`),
+        fetchJson(`/api/cpm/${projId}`),
+        fetchJson(`/api/db/dependencies`),
+      ]);
+    } catch (err) {
+      metaEl.innerHTML = `<span style="color:#f87171">Error: ${err.message}</span>`;
+      return;
     }
 
-    render();
+    const { project, tasks } = projData;
+    document.title = `crux — ${project.name} graph`;
+    document.getElementById('proj-name').textContent = project.name;
+
+    if (!tasks.length) {
+      metaEl.textContent = 'No tasks in this project.';
+      return;
+    }
+
+    metaEl.innerHTML =
+      `<strong>${tasks.length}</strong> tasks &nbsp;|&nbsp; ` +
+      `project duration: <strong>${cpm.project_duration ?? '?'}</strong> days &nbsp;|&nbsp; ` +
+      `${cpm.nodes.filter(n => n.is_critical).length} critical tasks`;
+
+    if (cpm.critical_path?.length) {
+      cpEl.textContent = '★ ' + cpm.critical_path.join(' → ');
+    }
+
+    const taskIds = new Set(tasks.map(t => t.id));
+    const edges   = allDeps.filter(d =>
+      taskIds.has(d.predecessor_id) && taskIds.has(d.successor_id)
+    );
+
+    const layout   = computeLayout(tasks, edges);
+    const contentW = PAD * 2 + layout.numCols  * COL_W;
+    const contentH = PAD * 2 + layout.numLanes * ROW_H;
+
+    renderGraph(innerEl, tasks, edges, cpm, layout);
+    setupPanZoom(svgEl, innerEl, contentW, contentH);
+
+    // Node click → info panel
+    const cpmById = new Map(cpm.nodes.map(n => [n.id, n]));
+    svgEl.addEventListener('click', e => {
+      const g = e.target.closest('.node');
+      if (!g) return;
+      const nid  = parseInt(g.dataset.id, 10);
+      const task = tasks.find(t => t.id === nid);
+      if (task) showInfo(task, cpmById.get(nid), infoEl);
+    });
+  }
+
+  main();
   </script>
 </body>
 </html>

@@ -13,6 +13,7 @@ export interface CpmNode {
   title: string;
   duration: number; // days (defaults to 1 if null)
   phase?: string | null;
+  value_score?: number | null; // business value 0–100
 }
 
 export interface CpmEdge {
@@ -38,6 +39,8 @@ export interface CpmResultNode {
   late_finish: number;
   float_days: number;
   is_critical: boolean;
+  value_score: number | null;
+  wsjf_score: number | null; // value_score / duration (higher = prioritise first)
 }
 
 // ── Topological sort (Kahn's algorithm) ───────────────────────────────────────
@@ -142,18 +145,23 @@ export function computeCpm(nodes: CpmNode[], edges: CpmEdge[]): CpmResult {
     const ls  = LS.get(id)!;
     const lf  = LF.get(id)!;
     const flt = Math.round((ls - es) * 1000) / 1000; // round fp noise
+    const dur = duration(id);
+    const val = n.value_score ?? null;
+    const wsjf = (val != null && dur > 0) ? Math.round((val / dur) * 100) / 100 : null;
     return {
       id,
-      slug:        n.slug,
-      title:       n.title,
-      phase:       n.phase ?? null,
-      duration:    duration(id),
-      early_start: es,
+      slug:         n.slug,
+      title:        n.title,
+      phase:        n.phase ?? null,
+      duration:     dur,
+      early_start:  es,
       early_finish: ef,
-      late_start:  ls,
-      late_finish: lf,
-      float_days:  flt,
-      is_critical: flt <= 0,
+      late_start:   ls,
+      late_finish:  lf,
+      float_days:   flt,
+      is_critical:  flt <= 0,
+      value_score:  val,
+      wsjf_score:   wsjf,
     };
   });
 

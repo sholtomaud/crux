@@ -113,13 +113,19 @@ export function syncTasks(
 ): SyncAction[] {
   const actions: SyncAction[] = [];
 
+  // Build a title→issue map from existing GH issues to avoid duplicates
+  const existingIssues = listIssues(repo, 'crux');
+  const issueByTitle = new Map<string, number>(existingIssues.map(i => [i.title, i.number]));
+
   for (const task of tasks) {
     if (task.status === 'dropped') {
       actions.push({ action: 'skip', task_slug: task.slug, reason: 'dropped tasks excluded' });
       continue;
     }
 
-    if (!task.gh_issue_number) {
+    const resolvedIssueNum = task.gh_issue_number ?? issueByTitle.get(task.title) ?? null;
+
+    if (!resolvedIssueNum) {
       // Task has no linked issue → create one
       actions.push({ action: 'create', task_slug: task.slug, reason: 'no linked GH issue' });
       if (apply) {
@@ -127,12 +133,14 @@ export function syncTasks(
         actions[actions.length - 1].issue_number = issue.number;
       }
     } else {
-      const issueNum = task.gh_issue_number;
-      if (task.status === 'done') {
-        actions.push({ action: 'close', task_slug: task.slug, issue_number: issueNum, reason: 'task is done' });
-        if (apply) closeIssue(repo, issueNum, `Closed by crux: task \`${task.slug}\` marked done.`);
-      } else if (task.status === 'open' || task.status === 'in-progress' || task.status === 'blocked') {
-        actions.push({ action: 'skip', task_slug: task.slug, issue_number: issueNum, reason: 'issue already open' });
+      if (task.gh_issue_number == null) {
+        // Found by title match — record the link
+        actions.push({ action: 'create', task_slug: task.slug, reason: 'linked existing issue by title', issue_number: resolvedIssueNum });
+      } else if (task.status === 'done') {
+        actions.push({ action: 'close', task_slug: task.slug, issue_number: resolvedIssueNum, reason: 'task is done' });
+        if (apply) closeIssue(repo, resolvedIssueNum, `Closed by crux: task \`${task.slug}\` marked done.`);
+      } else {
+        actions.push({ action: 'skip', task_slug: task.slug, issue_number: resolvedIssueNum, reason: 'issue already open' });
       }
     }
   }
