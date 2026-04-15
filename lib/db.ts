@@ -20,7 +20,7 @@ export function openDb(path: string = DEFAULT_DB_PATH): DatabaseSync {
   if (_db) return _db;
   const dir = dirname(path);
   if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: });
+    mkdirSync(dir, { recursive: true });
   }
   _db = new DatabaseSync(path);
   _db.exec(SCHEMA_SQL);
@@ -60,7 +60,7 @@ export function writeProjectPointer(projectId: string): void {
   if (!root) throw new Error('No repo root found');
   const dir = join(root, '.crux');
   if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: });
+    mkdirSync(dir, { recursive: true });
   }
   const pointerPath = join(dir, 'project.json');
   writeFileSync(pointerPath, JSON.stringify({ projectId }, null, 2));
@@ -90,8 +90,7 @@ export function projectById(id: string): Project | null {
 
 export function allProjects(): Project[] {
   const db = _db || openDb();
-  const rows = db.prepare('SELECT * FROM projects').all() as Project[];
-  return rows;
+  return db.prepare('SELECT * FROM projects').all() as Project[];
 }
 
 export function updateProjectStatus(id: string, status: ProjectStatus): void {
@@ -116,8 +115,7 @@ export function updateTaskValueScore(taskId: string, score: number): void {
 
 export function tasksByProject(projectId: string): Task[] {
   const db = _db || openDb();
-  const rows = db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at').all(projectId) as Task[];
-  return rows;
+  return db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at').all(projectId) as Task[];
 }
 
 export function taskBySlug(projectId: string, slug: string): Task | null {
@@ -153,13 +151,12 @@ export function addDependency(taskId: string, dependsOnId: string): void {
 
 export function dependenciesByProject(projectId: string): { task_id: string, depends_on_id: string }[] {
   const db = _db || openDb();
-  const rows = db.prepare(`
+  return db.prepare(`
     SELECT td.task_id, td.depends_on_id
     FROM task_dependencies td
     JOIN tasks t ON td.task_id = t.id
     WHERE t.project_id = ?
   `).all(projectId) as { task_id: string, depends_on_id: string }[];
-  return rows;
 }
 
 export function startSession(projectId: string): string {
@@ -206,9 +203,13 @@ export function roiSummary(projectId: string): { total: number, count: number } 
 export function totalHours(projectId: string): number {
   const db = _db || openDb();
   const row = db.prepare(`
-    SELECT COALESCE(SUM(duration_minutes), 0) as total_minutes
+    SELECT COALESCE(SUM(duration_minutes), 0) as total
     FROM sessions
-    JOIN tasks ON sessions.project_id = tasks.project_id
-    WHERE sessions.project_id = ? AND sessions.ended_at IS NOT NULL
-  `).get(projectId) as { total_minutes: number } | undefined;
-  return (row?.total_minutes || 0) /
+    WHERE project_id = ?
+  `).get(projectId) as { total: number } | undefined;
+  return (row?.total || 0) / 60;
+}
+
+export function firstRevenueAt(db: DatabaseSync, projectId: string): string | null {
+  const row = db.prepare(`
+    SELECT MIN(recorded_at) as first_re
