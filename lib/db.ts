@@ -12,23 +12,29 @@ import { randomUUID } from 'node:crypto';
 
 import { SCHEMA_SQL } from './schema-sql.ts';
 
-const DB_PATH = join(homedir(), '.crux', 'crux.db');
+const DEFAULT_DB_PATH = join(homedir(), '.crux', 'crux.db');
 
-function openDb(): DatabaseSync {
-  const dir = dirname(DB_PATH);
+let _db: DatabaseSync | null = null;
+
+export function openDb(path: string = DEFAULT_DB_PATH): DatabaseSync {
+  if (_db) return _db;
+  const dir = dirname(path);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  const db = new DatabaseSync(DB_PATH);
-  db.exec(SCHEMA_SQL);
-  return db;
+  _db = new DatabaseSync(path);
+  _db.exec(SCHEMA_SQL);
+  return _db;
 }
 
-function closeDb(db: DatabaseSync): void {
-  db.close();
+export function closeDb(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
 }
 
-function findRepoRoot(): string | null {
+export function findRepoRoot(): string | null {
   let dir = process.cwd();
   while (dir !== dirname(dir)) {
     if (existsSync(join(dir, '.git'))) {
@@ -39,36 +45,35 @@ function findRepoRoot(): string | null {
   return null;
 }
 
-function readProjectPointer(): string | null {
-  const projectPath = join(homedir(), '.crux', 'project.json');
-  if (!existsSync(projectPath)) return null;
-  const data = readFileSync(projectPath, 'utf-8');
-  const parsed = JSON.parse(data);
-  return parsed.projectId || null;
+export function readProjectPointer(): string | null {
+  const root = findRepoRoot();
+  if (!root) return null;
+  const pointerPath = join(root, '.crux', 'project.json');
+  if (!existsSync(pointerPath)) return null;
+  const content = readFileSync(pointerPath, 'utf-8');
+  const data = JSON.parse(content);
+  return data.projectId || null;
 }
 
-function writeProjectPointer(projectId: string): void {
-  const dir = join(homedir(), '.crux');
+export function writeProjectPointer(projectId: string): void {
+  const root = findRepoRoot();
+  if (!root) throw new Error('No repo root found');
+  const dir = join(root, '.crux');
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  const data = JSON.stringify({ projectId }, null, 2);
-  writeFileSync(join(dir, 'project.json'), data);
+  const pointerPath = join(dir, 'project.json');
+  writeFileSync(pointerPath, JSON.stringify({ projectId }, null, 2));
 }
 
-function resolveProject(): string | null {
+export function resolveProject(): string {
   const pointer = readProjectPointer();
   if (pointer) return pointer;
-  const repoRoot = findRepoRoot();
-  if (!repoRoot) return null;
-  const projectPath = join(repoRoot, '.crux', 'project.json');
-  if (!existsSync(projectPath)) return null;
-  const data = readFileSync(projectPath, 'utf-8');
-  const parsed = JSON.parse(data);
-  return parsed.projectId || null;
+  throw new Error('No project pointer found. Run `crux init` first.');
 }
 
-function insertProject(db: DatabaseSync, name: string, type: 'startup' | 'side-project' | 'enterprise' = 'startup'): string {
+export function insertProject(name: string, type: ProjectType = 'startup'): string {
+  const db = _db || openDb();
   const id = randomUUID();
   db.prepare(`
     INSERT INTO projects (id, name, type, status, created_at)
@@ -77,102 +82,149 @@ function insertProject(db: DatabaseSync, name: string, type: 'startup' | 'side-p
   return id;
 }
 
-function projectById(db: DatabaseSync, id: string): { id: string; name: string; type: string; status: string; created_at: string } | null {
-  const row = db.prepare(`SELECT id, name, type, status, created_at FROM projects WHERE id = ?`).get(id);
+export function projectById(id: string): Project | null {
+  const db = _db || openDb();
+  const row = db.prepare(`
+    SELECT * FROM projects WHERE id = ?
+  `).get(id) as Project | undefined;
   return row || null;
 }
 
-function allProjects(db: DatabaseSync): Array<{ id: string; name: string; type: string; status: string; created_at: string }> {
-  return db.prepare(`SELECT id, name, type, status, created_at FROM projects`).all();
+export function allProjects(): Project[] {
+  const db = _db || openDb();
+  return db.prepare(`
+    SELECT * FROM projects ORDER BY created_at DESC
+  `).all() as Project[];
 }
 
-function updateProjectStatus(db: DatabaseSync, id: string, status: string): void {
-  db.prepare(`UPDATE projects SET status = ? WHERE id = ?`).run(status, id);
+export function updateProjectStatus(id: string, status: ProjectStatus): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE projects SET status = ? WHERE id = ?
+  `).run(status, id);
 }
 
-function updateProjectGhRepo(db: DatabaseSync, id: string, repo: string): void {
-  db.prepare(`UPDATE projects SET gh_repo = ? WHERE id = ?`).run(repo, id);
+export function updateProjectGhRepo(id: string, repo: string): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE projects SET gh_repo = ? WHERE id = ?
+  `).run(repo, id);
 }
 
-function updateTaskGhIssue(db: DatabaseSync, taskId: string, issue: string): void {
-  db.prepare(`UPDATE tasks SET gh_issue = ? WHERE id = ?`).run(issue, taskId);
+export function updateTaskGhIssue(taskId: string, issue: string): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE tasks SET gh_issue = ? WHERE id = ?
+  `).run(issue, taskId);
 }
 
-function updateTaskValueScore(db: DatabaseSync, taskId: string, score: number): void {
-  db.prepare(`UPDATE tasks SET value_score = ? WHERE id = ?`).run(score, taskId);
+export function updateTaskValueScore(taskId: string, score: number): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE tasks SET value_score = ? WHERE id = ?
+  `).run(score, taskId);
 }
 
-function tasksByProject(db: DatabaseSync, projectId: string): Array<{ id: string; slug: string; title: string; status: string; type: string; estimated_hours: number; actual_hours: number; value_score: number | null; gh_issue: string | null; created_at: string }> {
-  return db.prepare(`SELECT id, slug, title, status, type, estimated_hours, actual_hours, value_score, gh_issue, created_at FROM tasks WHERE project_id = ?`).all(projectId);
+export function tasksByProject(projectId: string): Task[] {
+  const db = _db || openDb();
+  return db.prepare(`
+    SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at ASC
+  `).all(projectId) as Task[];
 }
 
-function taskBySlug(db: DatabaseSync, projectId: string, slug: string): { id: string; slug: string; title: string; status: string; type: string; estimated_hours: number; actual_hours: number; value_score: number | null; gh_issue: string | null; created_at: string } | null {
-  const row = db.prepare(`SELECT id, slug, title, status, type, estimated_hours, actual_hours, value_score, gh_issue, created_at FROM tasks WHERE project_id = ? AND slug = ?`).get(projectId, slug);
+export function taskBySlug(projectId: string, slug: string): Task | null {
+  const db = _db || openDb();
+  const row = db.prepare(`
+    SELECT * FROM tasks WHERE project_id = ? AND slug = ?
+  `).get(projectId, slug) as Task | undefined;
   return row || null;
 }
 
-function insertTask(db: DatabaseSync, projectId: string, slug: string, title: string, type: 'feature' | 'bug' | 'research' | 'maintenance' = 'feature', estimatedHours: number = 0): string {
+export function insertTask(projectId: string, slug: string, title: string, type: TaskType = 'feature'): string {
+  const db = _db || openDb();
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO tasks (id, project_id, slug, title, type, status, estimated_hours, actual_hours, value_score, gh_issue, created_at)
-    VALUES (?, ?, ?, ?, ?, 'todo', ?, 0, NULL, NULL, datetime('now'))
-  `).run(id, projectId, slug, title, type, estimatedHours);
+    INSERT INTO tasks (id, project_id, slug, title, type, status, created_at)
+    VALUES (?, ?, ?, ?, ?, 'todo', datetime('now'))
+  `).run(id, projectId, slug, title, type);
   return id;
 }
 
-function updateTaskStatus(db: DatabaseSync, taskId: string, status: string): void {
-  db.prepare(`UPDATE tasks SET status = ? WHERE id = ?`).run(status, taskId);
+export function updateTaskStatus(taskId: string, status: TaskStatus): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE tasks SET status = ? WHERE id = ?
+  `).run(status, taskId);
 }
 
-function updateTaskCpm(db: DatabaseSync, taskId: string, cpm: number): void {
-  db.prepare(`UPDATE tasks SET cpm = ? WHERE id = ?`).run(cpm, taskId);
+export function updateTaskCpm(taskId: string, cpm: number): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE tasks SET cpm = ? WHERE id = ?
+  `).run(cpm, taskId);
 }
 
-function addDependency(db: DatabaseSync, projectId: string, taskId: string, dependsOnId: string): void {
-  db.prepare(`INSERT INTO task_dependencies (project_id, task_id, depends_on_id) VALUES (?, ?, ?)`).run(projectId, taskId, dependsOnId);
+export function addDependency(taskId: string, dependsOnId: string): void {
+  const db = _db || openDb();
+  db.prepare(`
+    INSERT OR IGNORE INTO dependencies (task_id, depends_on_id)
+    VALUES (?, ?)
+  `).run(taskId, dependsOnId);
 }
 
-function dependenciesByProject(db: DatabaseSync, projectId: string): Array<{ task_id: string; depends_on_id: string }> {
-  return db.prepare(`SELECT task_id, depends_on_id FROM task_dependencies WHERE project_id = ?`).all(projectId);
+export function dependenciesByProject(projectId: string): { task_id: string, depends_on_id: string }[] {
+  const db = _db || openDb();
+  return db.prepare(`
+    SELECT * FROM dependencies WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)
+  `).all(projectId) as { task_id: string, depends_on_id: string }[];
 }
 
-function startSession(db: DatabaseSync, taskId: string): string {
+export function startSession(projectId: string): string {
+  const db = _db || openDb();
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO sessions (id, task_id, started_at)
+    INSERT INTO sessions (id, project_id, started_at)
     VALUES (?, ?, datetime('now'))
-  `).run(id, taskId);
+  `).run(id, projectId);
   return id;
 }
 
-function endSession(db: DatabaseSync, sessionId: string): void {
-  db.prepare(`UPDATE sessions SET ended_at = datetime('now') WHERE id = ?`).run(sessionId);
+export function endSession(sessionId: string): void {
+  const db = _db || openDb();
+  db.prepare(`
+    UPDATE sessions SET ended_at = datetime('now') WHERE id = ?
+  `).run(sessionId);
 }
 
-function activeSession(db: DatabaseSync, taskId: string): { id: string; task_id: string; started_at: string; ended_at: string | null } | null {
-  const row = db.prepare(`SELECT id, task_id, started_at, ended_at FROM sessions WHERE task_id = ? AND ended_at IS NULL`).get(taskId);
-  return row || null;
+export function activeSession(projectId: string): string | null {
+  const db = _db || openDb();
+  const row = db.prepare(`
+    SELECT id FROM sessions WHERE project_id = ? AND ended_at IS NULL
+  `).get(projectId) as { id: string } | undefined;
+  return row ? row.id : null;
 }
 
-function insertRoi(db: DatabaseSync, projectId: string, kind: 'revenue' | 'cost' | 'value', amount: number, recordedAt: string): string {
+export function insertRoi(projectId: string, kind: RoiKind, amount: number, recorded_at: string): string {
+  const db = _db || openDb();
   const id = randomUUID();
   db.prepare(`
     INSERT INTO roi_records (id, project_id, kind, amount, recorded_at)
     VALUES (?, ?, ?, ?, ?)
-  `).run(id, projectId, kind, amount, recordedAt);
+  `).run(id, projectId, kind, amount, recorded_at);
   return id;
 }
 
-function roiSummary(db: DatabaseSync, projectId: string): { totalRevenue: number; totalCost: number; netValue: number } {
+export function roiSummary(projectId: string): { total: number, count: number } {
+  const db = _db || openDb();
   const row = db.prepare(`
-    SELECT 
-      COALESCE(SUM(CASE WHEN kind = 'revenue' THEN amount ELSE 0 END), 0) as totalRevenue,
-      COALESCE(SUM(CASE WHEN kind = 'cost' THEN amount ELSE 0 END), 0) as totalCost
-    FROM roi_records WHERE project_id = ?
-  `).get(projectId);
-  return {
-    totalRevenue: row?.totalRevenue || 0,
-    totalCost: row?.totalCost || 0,
-    netValue: (row?.totalRevenue || 0) - (row?.totalCost || 0)
-  };
+    SELECT SUM(amount) as total, COUNT(*) as count FROM roi_records WHERE project_id = ?
+  `).get(projectId) as { total: number | null, count: number } | undefined;
+  return { total: row?.total || 0, count: row?.count || 0 };
 }
+
+export function totalHours(projectId: string): number {
+  const db = _db || openDb();
+  const row = db.prepare(`
+    SELECT SUM(duration) as total FROM sessions WHERE project_id = ? AND ended_at IS NOT NULL
+  `).get(projectId) as { total: number | null } | undefined;
+  return row?.total ||
