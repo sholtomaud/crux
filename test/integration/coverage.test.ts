@@ -60,7 +60,7 @@ describe('test_runs', () => {
     const pid = seedProject(db);
     seedTask(db, pid, 'p1-db-test', 80);
 
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'pass', task_slug: 'p1-db-test', coverage: 85.5 });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'pass', task_slug: 'p1-db-test', coverage: 85.5 });
 
     const row = db.prepare(
       'SELECT * FROM test_runs WHERE project_id = ? AND task_slug = ?'
@@ -76,7 +76,7 @@ describe('test_runs', () => {
     const pid = seedProject(db);
     seedTask(db, pid, 'p2-cpm-test');
 
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'fail', task_slug: 'p2-cpm-test' });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'fail', task_slug: 'p2-cpm-test' });
 
     const row = db.prepare(
       'SELECT * FROM test_runs WHERE project_id = ? AND task_slug = ?'
@@ -96,7 +96,7 @@ describe('coverage target', () => {
     const pid = seedProject(db);
     seedTask(db, pid, 'needs-coverage', 75);
 
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'pass', task_slug: 'needs-coverage', coverage: 80 });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'pass', task_slug: 'needs-coverage', coverage: 80 });
 
     // Check if coverage target met
     const task = db.prepare(
@@ -116,7 +116,7 @@ describe('coverage target', () => {
     const pid = seedProject(db);
     seedTask(db, pid, 'low-coverage', 90);
 
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'pass', task_slug: 'low-coverage', coverage: 70 });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'pass', task_slug: 'low-coverage', coverage: 70 });
 
     const task = db.prepare(
       'SELECT coverage_target FROM tasks WHERE project_id = ? AND slug = ?'
@@ -135,7 +135,7 @@ describe('coverage target', () => {
     const pid = seedProject(db);
     seedTask(db, pid, 'no-target', null);  // no coverage_target
 
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'pass', task_slug: 'no-target' });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'pass', task_slug: 'no-target' });
 
     const task = db.prepare(
       'SELECT coverage_target FROM tasks WHERE project_id = ? AND slug = ?'
@@ -154,9 +154,9 @@ describe('multiple test runs', () => {
     const pid = seedProject(db);
     seedTask(db, pid, 'flaky-test');
 
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'fail', task_slug: 'flaky-test' });
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'fail', task_slug: 'flaky-test' });
-    insertTestRun(db, { project_id: pid, phase: 'test', status: 'pass', task_slug: 'flaky-test', coverage: 82 });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'fail', task_slug: 'flaky-test' });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'fail', task_slug: 'flaky-test' });
+    insertTestRun(db, { project_id: pid, phase: 'build', status: 'pass', task_slug: 'flaky-test', coverage: 82 });
 
     const runs = db.prepare(
       'SELECT status FROM test_runs WHERE project_id = ? AND task_slug = ? ORDER BY run_at'

@@ -21,8 +21,10 @@ import {
   insertRoi, roiSummary, totalHours,
   insertTestRun, logAudit, recentAudit, projectStatus,
   insertAdr, listAdrs,
+  updateTaskType,
+  updateTaskSpec,
 } from './lib/db.ts';
-import type { Project, ProjectType, TaskStatus } from './lib/db.ts';
+import type { Project, ProjectType, TaskStatus, TaskType } from './lib/db.ts';
 
 import { computeCpm, asciiDag, dotGraph } from './lib/cpm.ts';
 import type { CpmNode, CpmEdge } from './lib/cpm.ts';
@@ -33,6 +35,7 @@ import { exportCsv, syncToSheets } from './lib/sheets.ts';
 import { startServer } from './lib/server.ts';
 import { syncTasks } from './lib/gh.ts';
 import { runAgent } from './lib/agent.ts';
+import { runWorkflow } from './lib/workflow.ts';
 
 // ── Mode detection ─────────────────────────────────────────────────────────────
 // CLI: args present, or stdin is a TTY
@@ -126,7 +129,8 @@ STATUS
   ready                          Go/no-go release readiness
 
 TASKS
-  task add <slug> <title>        Add task
+  task add <slug> <title>        Add task [--type coding|writing|research|accounting|verification|design|other]
+  task type <slug> <type>        Set task type
   task done <slug> [--note ""]   Mark done
   task start <slug>              Mark in-progress
   task block <slug> [--note ""]  Mark blocked
@@ -163,7 +167,8 @@ OTHER
   agent --task <slug>            Run local LLM agent on a single task
     [--dry-run] [--max-iter N]
   agent --run-all                Run agent on all unblocked tasks in WSJF order
-    [--phase <phase>] [--dry-run] [--max-iter N]
+    [--phase <phase>] [--dry-run] [--max-iter N]     (resumes in-progress first)
+  agent --reset-stalled          Reset all in-progress tasks back to open
   ui [--port 8765] [--no-open]   Start browser UI
 
 Tier 1 (CLI, free) → Tier 2 (crux ask, local LLM) → Tier 3 (Claude via MCP)
@@ -369,23 +374,41 @@ function cmdTask(args: string[]): void {
   const proj = getProject();
   const sub  = args[0];
 
+  const TASK_TYPES = ['coding','writing','research','accounting','verification','design','other'];
+
   if (sub === 'add') {
-    const slug  = args[1];
-    const title = args.slice(2).join(' ');
-    if (!slug || !title) { console.error('Usage: crux task add <slug> <title>'); process.exit(1); }
-    const task = insertTask(db, { project_id: proj.id, slug, title });
+    const slug     = args[1];
+    const typeFlag = flag(args, '--type') as TaskType | null;
+    const titleArgs = args.slice(2).filter(a => !a.startsWith('--') && a !== typeFlag);
+    const title    = titleArgs.join(' ');
+    if (!slug || !title) { console.error('Usage: crux task add <slug> <title> [--type coding|writing|research|accounting|verification|design|other]'); process.exit(1); }
+    const task_type = (typeFlag && TASK_TYPES.includes(typeFlag)) ? typeFlag : undefined;
+    const task = insertTask(db, { project_id: proj.id, slug, title, task_type });
     logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.add', detail: title, actor: 'human' });
-    console.log(`✓ Task added: ${slug}`);
+    console.log(`✓ Task added: ${slug} [${task.task_type}]`);
     return;
   }
 
   const slug   = args[1];
   const note   = flag(args, '--note') ?? undefined;
+  const typeFlag = flag(args, '--type') as TaskType | null;
   const task   = slug ? taskBySlug(db, proj.id, slug) : null;
 
   if (!slug || !task) { console.error(`Task not found: ${slug}`); process.exit(1); }
 
-  const statusMap: Record<string, TaskStatus> = { done: 'done', start: 'in-progress', block: 'blocked', drop: 'dropped' };
+  // Handle `crux task type <slug> <type>` or `crux task update <slug> --type <type>`
+  if (sub === 'type' || (sub === 'update' && typeFlag)) {
+    const newType = (sub === 'type' ? args[2] : typeFlag) as TaskType;
+    if (!newType || !TASK_TYPES.includes(newType)) {
+      console.error(`Valid types: ${TASK_TYPES.join(', ')}`); process.exit(1);
+    }
+    updateTaskType(db, task.id, newType);
+    logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.update', detail: `type → ${newType}`, actor: 'human' });
+    console.log(`✓ ${slug} type → ${newType}`);
+    return;
+  }
+
+  const statusMap: Record<string, TaskStatus> = { done: 'done', start: 'in-progress', block: 'blocked', drop: 'dropped', update: 'open' };
   const newStatus = statusMap[sub];
   if (!newStatus) { console.error(`Unknown task sub-command: ${sub}`); process.exit(1); }
 
@@ -775,51 +798,85 @@ function cmdContext(): void {
 // ── agent ─────────────────────────────────────────────────────────────────────
 
 function nextUnblockedTasks(db: ReturnType<typeof openDb>, projId: string, phase?: string) {
-  const tasks = tasksByProject(db, projId);
-  const deps  = dependenciesByProject(db, projId);
+  const tasks   = tasksByProject(db, projId);
+  const deps    = dependenciesByProject(db, projId);
   const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
 
-  return tasks
+  const wsjf = (t: typeof tasks[0]) => (t.value_score ?? 0) / (t.duration_days ?? 1);
+
+  // in-progress tasks come first (resume before starting new ones)
+  const inProgress = tasks
+    .filter(t => t.status === 'in-progress' && (!phase || t.phase === phase))
+    .sort((a, b) => wsjf(b) - wsjf(a));
+
+  const open = tasks
     .filter(t => {
       if (t.status !== 'open') return false;
       if (phase && t.phase !== phase) return false;
       const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
       return preds.every(id => doneIds.has(id));
     })
-    .sort((a, b) => {
-      const wsjfA = (a.value_score ?? 0) / (a.duration_days ?? 1);
-      const wsjfB = (b.value_score ?? 0) / (b.duration_days ?? 1);
-      return wsjfB - wsjfA;
-    });
+    .sort((a, b) => wsjf(b) - wsjf(a));
+
+  return [...inProgress, ...open];
+}
+
+function stalledTasks(db: ReturnType<typeof openDb>, projId: string) {
+  return tasksByProject(db, projId).filter(t => t.status === 'in-progress');
 }
 
 async function cmdAgent(args: string[]): Promise<void> {
-  const taskSlug   = flag(args, '--task');
-  const runAll     = hasFlag(args, '--run-all');
-  const phase      = flag(args, '--phase') ?? undefined;
-  const dryRun     = hasFlag(args, '--dry-run');
-  const maxIterStr = flag(args, '--max-iter');
-  const ctxStr     = flag(args, '--ctx-tokens');
-  const maxIter    = maxIterStr ? parseInt(maxIterStr, 10) : undefined;
-  const ctxTokens  = ctxStr    ? parseInt(ctxStr,     10) : undefined;
+  const taskSlug      = flag(args, '--task');
+  const runAll        = hasFlag(args, '--run-all');
+  const resetStalled  = hasFlag(args, '--reset-stalled');
+  const phase         = flag(args, '--phase') ?? undefined;
+  const dryRun        = hasFlag(args, '--dry-run');
+  const maxIterStr    = flag(args, '--max-iter');
+  const ctxStr        = flag(args, '--ctx-tokens');
+  const maxIter       = maxIterStr ? parseInt(maxIterStr, 10) : undefined;
+  const ctxTokens     = ctxStr    ? parseInt(ctxStr,     10) : undefined;
 
-  if (!taskSlug && !runAll) {
-    console.error('Usage:\n  crux agent --task <slug> [--dry-run] [--max-iter N] [--ctx-tokens N]\n  crux agent --run-all [--phase <phase>] [--dry-run] [--max-iter N] [--ctx-tokens N]');
+  if (!taskSlug && !runAll && !resetStalled) {
+    console.error([
+      'Usage:',
+      '  crux agent --task <slug> [--dry-run] [--max-iter N] [--ctx-tokens N]',
+      '  crux agent --run-all [--phase <phase>] [--dry-run] [--max-iter N] [--ctx-tokens N]',
+      '  crux agent --reset-stalled          Reset all in-progress tasks back to open',
+    ].join('\n'));
     process.exit(1);
   }
 
   const db   = openDb();
   const proj = getProject();
 
+  // ── reset-stalled: move all in-progress back to open ─────────────────────
+  if (resetStalled) {
+    const stalled = stalledTasks(db, proj.id);
+    if (stalled.length === 0) { console.log('No stalled tasks.'); return; }
+    for (const t of stalled) {
+      updateTaskStatus(db, proj.id, t.slug, 'open');
+      logAudit(db, { project_id: proj.id, task_id: t.id, event: 'task.open', detail: 'reset from in-progress by --reset-stalled', actor: 'human' });
+      console.log(`↺  ${t.slug} → open`);
+    }
+    console.log(`\nReset ${stalled.length} task(s). Run crux agent --run-all to resume.`);
+    return;
+  }
+
   if (taskSlug) {
-    const result = await runAgent(db, proj, taskSlug, { dryRun, maxIter, ctxTokens });
+    const task = taskBySlug(db, proj.id, taskSlug);
+    if (!task) { console.error(`Task not found: ${taskSlug}`); process.exit(1); }
+    if (dryRun) {
+      console.log(`[dry-run] task: ${task.slug} type: ${task.task_type}`);
+      return;
+    }
+    const result = await runWorkflow(db, proj, task, { ctxTokens });
     if (result.completed) {
-      console.log(`✓ done: ${taskSlug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+      console.log(`✓ done: ${taskSlug}${result.note ? ` — ${result.note}` : ''}`);
     } else if (result.blocked) {
-      console.log(`⊘ blocked: ${taskSlug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+      console.log(`⊘ blocked at step '${result.step}': ${taskSlug}${result.note ? ` — ${result.note}` : ''}`);
       process.exit(2);
     } else {
-      console.log(`⚠ stopped after ${result.iterations} iterations`);
+      console.log(`⚠ stopped at step '${result.step}'`);
       process.exit(1);
     }
     return;
@@ -840,25 +897,24 @@ async function cmdAgent(args: string[]): Promise<void> {
     }
 
     const task = queue[0];
-    console.log(`\n→ next: ${task.slug} (${queue.length} in queue)`);
+    console.log(`\n→ next: ${task.slug} [${task.task_type}] (${queue.length} in queue)`);
+    if (dryRun) { console.log(`[dry-run] would run ${task.task_type} workflow`); break; }
 
-    const result = await runAgent(db, proj, task.slug, { dryRun, maxIter, ctxTokens });
+    const result = await runWorkflow(db, proj, task, { ctxTokens });
 
     if (result.completed) {
       completed++;
-      console.log(`✓ done: ${task.slug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
+      console.log(`✓ done: ${task.slug}${result.note ? ` — ${result.note}` : ''}`);
     } else if (result.blocked) {
       blocked++;
-      console.log(`⊘ blocked: ${task.slug}${result.finalNote ? ` — ${result.finalNote}` : ''}`);
-      // Don't stop — try the next unblocked task
+      console.log(`⊘ blocked at '${result.step}': ${task.slug}${result.note ? ` — ${result.note}` : ''}`);
+      // Don't stop — re-evaluate queue and try next unblocked task
     } else {
       failed++;
-      console.log(`⚠ agent stopped without completing: ${task.slug}`);
-      // Stop the queue — something went wrong
+      console.log(`⚠ stopped at '${result.step}': ${task.slug}`);
+      // Stop the queue — something unexpected happened
       break;
     }
-
-    if (dryRun) break; // dry-run: show first task only
   }
 
   if (blocked > 0 || failed > 0) process.exit(1);
@@ -965,29 +1021,86 @@ async function runMcpServer(): Promise<void> {
     }
   );
 
-  server.tool('crux_task_add', 'Add a task to the current project',
-    { slug: z.string(), title: z.string(), description: z.string().optional(), phase: z.string().optional(), duration_days: z.number().optional(), coverage_target: z.number().optional(), value_score: z.number().min(0).max(100).optional() },
-    ({ slug, title, description, phase, duration_days, coverage_target, value_score }) => {
+  server.tool(
+    'crux_task_add',
+    `Add a task to the current project.
+
+REQUIRED for coding tasks (task_type='coding'):
+  - acceptance_criteria: testable done condition written as assertions, e.g.
+      "firstRevenueAt(db, projectId) returns ISO string or null; test uses new DatabaseSync(':memory:') + schema.sql; asserts MIN(recorded_at) WHERE kind='revenue' AND amount>0"
+  - files_affected: exact file paths that will change, e.g. ["lib/db.ts", "index.ts"]
+
+The agent uses these fields to write correct tests and implementations grounded in the real codebase.
+Vague or missing acceptance_criteria causes the agent to invent APIs that don't exist.
+REQUIRED for writing tasks: acceptance_criteria describing the document structure/content.
+REQUIRED for research tasks: acceptance_criteria describing the decision to be made.`,
+    {
+      slug: z.string().describe('kebab-case identifier, e.g. p16-time-to-first-dollar'),
+      title: z.string().describe('Short imperative title'),
+      description: z.string().optional().describe('Full description of what to build and why'),
+      phase: z.string().optional(),
+      duration_days: z.number().optional(),
+      coverage_target: z.number().optional(),
+      value_score: z.number().min(0).max(100).optional().describe('Business value 0-100 for WSJF prioritisation'),
+      task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional().describe('Selects the workflow: coding=TDD, writing=draft+commit, research=ADR, verification=run tests'),
+      acceptance_criteria: z.string().optional().describe('REQUIRED for coding/writing/research. Testable done condition. For coding: name the exact functions/fields to add, what tests must assert, which DB pattern to follow.'),
+      files_affected: z.array(z.string()).optional().describe('REQUIRED for coding. Exact file paths that will be modified, e.g. ["lib/db.ts","index.ts","schema.sql"]'),
+    },
+    ({ slug, title, description, phase, duration_days, coverage_target, value_score, task_type, acceptance_criteria, files_affected }) => {
       try {
         const proj = requireProject();
-        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, duration_days, coverage_target, value_score });
+        const type = task_type ?? 'coding';
+
+        // Enforce spec completeness for agentic task types
+        if (['coding','writing','research'].includes(type) && !acceptance_criteria) {
+          return err(
+            `acceptance_criteria is required for ${type} tasks.\n` +
+            `Provide a testable done condition, e.g.:\n` +
+            `  coding:   "addFirstRevenueAt(db, projId) in lib/db.ts returns ISO string or null; test uses in-memory DB + schema.sql"\n` +
+            `  writing:  "docs/adr/NNN-slug.md exists with context/decision/consequences sections"\n` +
+            `  research: "ADR inserted via crux_adr_add with accepted status and concrete decision"`
+          );
+        }
+        if (type === 'coding' && (!files_affected || files_affected.length === 0)) {
+          return err(
+            `files_affected is required for coding tasks.\n` +
+            `Provide the exact file paths that will change, e.g. ["lib/db.ts", "index.ts", "schema.sql"]`
+          );
+        }
+
+        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, duration_days, coverage_target, value_score, task_type: type, acceptance_criteria, files_affected });
         logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.add', detail: title, actor: 'claude' });
         return ok(task);
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
 
-  server.tool('crux_task_update', 'Mark task start/done/blocked with optional note (audit logged)',
-    { slug: z.string(), status: z.enum(['open','in-progress','blocked','done','dropped']), note: z.string().optional(), value_score: z.number().min(0).max(100).optional() },
-    ({ slug, status, note, value_score }) => {
+  server.tool(
+    'crux_task_update',
+    `Update task status, type, spec fields, or value score (audit logged).
+Use acceptance_criteria and files_affected to add spec to under-specified tasks before running the agent.
+The agent reads these fields to write correct tests grounded in the real codebase API.`,
+    {
+      slug: z.string(),
+      status: z.enum(['open','in-progress','blocked','done','dropped']),
+      note: z.string().optional(),
+      value_score: z.number().min(0).max(100).optional(),
+      task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional(),
+      acceptance_criteria: z.string().optional().describe('Testable done condition. For coding: name exact functions/fields, what tests assert, which existing pattern to follow (e.g. "see insertRoi() in lib/db.ts").'),
+      files_affected: z.array(z.string()).optional().describe('Exact file paths that will be modified'),
+    },
+    ({ slug, status, note, value_score, task_type, acceptance_criteria, files_affected }) => {
       try {
         const proj = requireProject();
         const task = taskBySlug(db, proj.id, slug);
         if (!task) return err(`Task not found: ${slug}`);
         updateTaskStatus(db, proj.id, slug, status);
         if (value_score != null) updateTaskValueScore(db, task.id, value_score);
+        if (task_type != null) updateTaskType(db, task.id, task_type);
+        if (acceptance_criteria != null || files_affected != null)
+          updateTaskSpec(db, task.id, { acceptance_criteria: acceptance_criteria ?? undefined, files_affected: files_affected ?? undefined });
         logAudit(db, { project_id: proj.id, task_id: task.id, event: `task.${status}`, detail: note, actor: 'claude' });
-        return ok({ slug, status, note, value_score: value_score ?? task.value_score });
+        return ok({ slug, status, note, value_score: value_score ?? task.value_score, task_type: task_type ?? task.task_type });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
