@@ -24,7 +24,7 @@ import {
   updateTaskType,
   updateTaskSpec,
 } from './lib/db.ts';
-import type { Project, ProjectType, TaskStatus, TaskType } from './lib/db.ts';
+import type { Project, ProjectType, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
 
 import { computeCpm, asciiDag, dotGraph } from './lib/cpm.ts';
 import type { CpmNode, CpmEdge } from './lib/cpm.ts';
@@ -804,14 +804,15 @@ function nextUnblockedTasks(db: ReturnType<typeof openDb>, projId: string, phase
 
   const wsjf = (t: typeof tasks[0]) => (t.value_score ?? 0) / (t.duration_days ?? 1);
 
-  // in-progress tasks come first (resume before starting new ones)
+  // in-progress tasks come first (resume before starting new ones), excluding human tasks
   const inProgress = tasks
-    .filter(t => t.status === 'in-progress' && (!phase || t.phase === phase))
+    .filter(t => t.status === 'in-progress' && t.executor !== 'human' && (!phase || t.phase === phase))
     .sort((a, b) => wsjf(b) - wsjf(a));
 
   const open = tasks
     .filter(t => {
       if (t.status !== 'open') return false;
+      if (t.executor === 'human') return false;  // human tasks go in human_queue, not LLM queue
       if (phase && t.phase !== phase) return false;
       const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
       return preds.every(id => doneIds.has(id));
@@ -819,6 +820,20 @@ function nextUnblockedTasks(db: ReturnType<typeof openDb>, projId: string, phase
     .sort((a, b) => wsjf(b) - wsjf(a));
 
   return [...inProgress, ...open];
+}
+
+/** Human tasks whose predecessors are all done — need human action before successors can proceed */
+function humanQueue(db: ReturnType<typeof openDb>, projId: string) {
+  const tasks   = tasksByProject(db, projId);
+  const deps    = dependenciesByProject(db, projId);
+  const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
+
+  return tasks.filter(t => {
+    if (t.status !== 'open' && t.status !== 'in-progress') return false;
+    if (t.executor !== 'human') return false;
+    const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
+    return preds.every(id => doneIds.has(id));
+  }).map(t => ({ slug: t.slug, title: t.title, phase: t.phase, acceptance_criteria: t.acceptance_criteria }));
 }
 
 function stalledTasks(db: ReturnType<typeof openDb>, projId: string) {
@@ -982,9 +997,14 @@ async function runMcpServer(): Promise<void> {
     }
   );
 
-  server.tool('crux_status', 'Structured JSON: task counts, next unblocked tasks, blockers', {},
+  server.tool('crux_status', 'Structured JSON: task counts, next unblocked tasks, blockers, human action queue', {},
     () => {
-      try { return ok(projectStatus(db, requireProject().id)); }
+      try {
+        const proj   = requireProject();
+        const status = projectStatus(db, proj.id);
+        const hq     = humanQueue(db, proj.id);
+        return ok({ ...status, human_queue: hq });
+      }
       catch (e: unknown) { return err((e as Error).message); }
     }
   );

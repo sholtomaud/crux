@@ -37,7 +37,7 @@ RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 .PHONY: \
 	all help bootstrap image ensure-deps \
 	dev build preview \
-	test test-agent typecheck lint format validate \
+	test test-agent typecheck typecheck-errors lint format validate \
 	shell install ci \
 	mcpb-validate mcpb-pack \
 	bundle sea-linux sea-macos install \
@@ -111,6 +111,9 @@ test: ensure-deps ## Run test suite
 typecheck: ensure-deps ## Run TypeScript type checker (no emit)
 	@echo "🔍 Type checking..."
 	$(RUN_CI) node_modules/.bin/tsc --noEmit
+
+typecheck-errors: ensure-deps ## Show only error file paths from tsc (for triage)
+	@$(RUN_CI) node_modules/.bin/tsc --noEmit 2>&1 | grep "error TS" | sed 's/:.*//' | sort -u || true
 
 test-agent: ensure-deps ## Agent-compatible tests
 	@echo "🤖 Running agent tests..."

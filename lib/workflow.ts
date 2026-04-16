@@ -33,16 +33,34 @@ function readTestPattern(cwd: string): string {
   return content.slice(0, 2000); // first 2000 chars is enough to show the pattern
 }
 
-/** Extract all export signatures from lib/db.ts without the bodies */
+/** Extract export signatures from lib/db/*.ts domain modules (or fallback to lib/db.ts) */
 function readDbSignatures(cwd: string): string {
+  const dbDir = join(cwd, 'lib', 'db');
+  if (existsSync(dbDir)) {
+    const domainFiles = readdirSync(dbDir)
+      .filter(f => f.endsWith('.ts') && f !== 'index.ts')
+      .sort();
+    const sigs: string[] = [];
+    for (const f of domainFiles) {
+      const lines = readFileSync(join(dbDir, f), 'utf8').split('\n');
+      const exports = lines.filter(l =>
+        l.startsWith('export function') || l.startsWith('export interface') ||
+        l.startsWith('export type') || l.startsWith('export const')
+      );
+      if (exports.length) {
+        sigs.push(`// lib/db/${f}`);
+        sigs.push(...exports);
+      }
+    }
+    return sigs.join('\n').slice(0, 3000);
+  }
+  // fallback: monolith
   const p = join(cwd, 'lib', 'db.ts');
   if (!existsSync(p)) return '';
-  const lines = readFileSync(p, 'utf8').split('\n');
-  return lines
+  return readFileSync(p, 'utf8').split('\n')
     .filter(l => l.startsWith('export function') || l.startsWith('export interface') ||
                  l.startsWith('export type') || l.startsWith('export const'))
-    .join('\n')
-    .slice(0, 2000);
+    .join('\n').slice(0, 3000);
 }
 
 /** Read the first N lines of a file for context */
@@ -51,10 +69,18 @@ function readFileHead(filePath: string, lines = 80): string {
   return readFileSync(filePath, 'utf8').split('\n').slice(0, lines).join('\n');
 }
 
-/** Parse files_affected JSON array from task, with fallback */
+/** Parse files_affected JSON array from task */
 function affectedFiles(task: Task): string[] {
   if (!task.files_affected) return [];
   try { return JSON.parse(task.files_affected) as string[]; }
+  catch { return []; }
+}
+
+/** Parse files_to_create JSON array from task */
+interface FileToCreate { path: string; signature: string; imports?: string }
+function filesToCreate(task: Task): FileToCreate[] {
+  if (!task.files_to_create) return [];
+  try { return JSON.parse(task.files_to_create) as FileToCreate[]; }
   catch { return []; }
 }
 
@@ -139,42 +165,53 @@ function baseSystemPrompt(task: Task, proj: Project, db: DatabaseSync, resuming 
   const deps     = dependenciesByProject(db, proj.id);
   const slugById = new Map(tasks.map(t => [t.id, t.slug]));
   const preds    = deps.filter(d => d.successor_id === task.id).map(d => slugById.get(d.predecessor_id) ?? '?');
-  const cwd      = process.cwd();
   const files    = affectedFiles(task);
 
   const resumeNote = resuming
     ? `\nNOTE: This task was previously started but did not complete. Branch feat/${task.slug} may have partial work — check before overwriting.`
     : '';
 
-  // Inject heads of affected files so the LLM sees the real API
+  const newFiles  = filesToCreate(task);
+  const cwd = process.cwd();
+
+  // Inject heads of files_affected (existing files needing minor edits — imports, wiring)
   const fileContext = files.length
-    ? '\n\n## Files to modify (first 80 lines each):\n' +
+    ? '\n\n## Existing files needing edits (first 80 lines — add imports/exports only):\n' +
       files.map(f => `### ${f}\n${readFileHead(join(cwd, f))}`).join('\n\n')
     : '';
 
-  // Always show DB signatures so tests use the real API
+  // Structured list of new files to create
+  const newFilesContext = newFiles.length
+    ? '\n\n## New files to CREATE (do not modify any other file):\n' +
+      newFiles.map(f =>
+        `### ${f.path}\nSignature: ${f.signature}${f.imports ? `\nImports needed: ${f.imports}` : ''}`
+      ).join('\n\n')
+    : '';
+
+  // DB signatures from modular lib/db/*.ts
   const dbSigs = readDbSignatures(cwd);
 
   return `You are an expert TypeScript/Node.js engineer working on the crux project.
 
 ## Project conventions
-- DB layer: lib/db.ts — uses node:sqlite DatabaseSync, NOT pg/mysql/any other client
-- All DB functions take (db: DatabaseSync, ...) as first arg — use openDb() in CLI, pass db directly in tests
-- Tests: node:test + node:assert/strict, in-memory DB via new DatabaseSync(':memory:'), load schema.sql manually
-- Schema changes: schema.sql AND applyMigrations() in lib/db.ts (ALTER TABLE pattern)
-- MCP tools: index.ts runMcpServer() — use process.stderr.write, never console.log
-- Verify: make typecheck | Tests: make test | Never run node/npx/tsc directly (no toolchain on host)
+- DB layer: lib/db/<domain>.ts — one file per domain (roi.ts, tasks.ts, sessions.ts, etc.)
+- New DB functions: create a new file lib/db/<domain>.ts, then add its export to lib/db/index.ts
+- Do NOT edit lib/db.ts (it is a one-line re-export shim — do not add code there)
+- All DB functions take (db: DatabaseSync, ...) as first arg — use openDb() in CLI, pass db in tests
+- Tests: node:test + node:assert/strict, in-memory DB via new DatabaseSync(':memory:'), load schema.sql
+- Schema changes: schema.sql AND applyMigrations() in lib/db/open.ts (ALTER TABLE pattern)
+- MCP tools: index.ts — use process.stderr.write, never console.log
+- Verify: make typecheck | Tests: make test | Never run node/npx/tsc directly
 
-## lib/db.ts exports (real API — use these, do not invent new ones):
+## lib/db exports (real API — use these, do not invent):
 ${dbSigs}
 
 ## Task: ${task.slug}
 Title: ${task.title}
 Description: ${task.description ?? 'infer from title'}
 Acceptance criteria: ${task.acceptance_criteria ?? 'see description'}
-Files to change: ${files.length ? files.join(', ') : 'determine from description'}
 Depends on: ${preds.length ? preds.join(', ') : 'none'}
-ADRs: ${adrs.map(a => `ADR-${a.number}: ${a.decision?.slice(0, 80)}`).join(' | ')}${resumeNote}${fileContext}
+ADRs: ${adrs.map(a => `ADR-${a.number}: ${a.decision?.slice(0, 80)}`).join(' | ')}${resumeNote}${newFilesContext}${fileContext}
 
 Respond with file contents only. First line of each file: // path/to/file.ts`;
 }
@@ -298,17 +335,23 @@ Rules:
 
   // 4. LLM: write implementation
   log('\n[step 4/9] LLM: write implementation');
+  const newFiles  = filesToCreate(task);
+  const createInstruction = newFiles.length
+    ? `Create ONLY these new files (do not modify any existing file):\n${newFiles.map(f => `- ${f.path} — ${f.signature}`).join('\n')}`
+    : `Files to change: ${affectedFiles(task).join(', ') || 'determine from tests'}`;
+
   const implPrompt = `Implement: ${task.slug} — ${task.title}
 
 Acceptance criteria: ${task.acceptance_criteria ?? task.description ?? ''}
-Files to change: ${affectedFiles(task).join(', ') || 'determine from tests'}
+${createInstruction}
 
 These tests must pass:
 ${testContent.slice(0, 1500)}
 
 Rules:
-- Schema changes go in BOTH schema.sql AND applyMigrations() in lib/db.ts
-- New DB functions go in lib/db.ts, imported into index.ts
+- Schema changes go in BOTH schema.sql AND applyMigrations() in lib/db/open.ts
+- New DB functions go in a new lib/db/<domain>.ts file, then export from lib/db/index.ts
+- Do NOT edit lib/db.ts (re-export shim — contains only "export * from './db/index.ts'")
 - New MCP tools go in runMcpServer() in index.ts
 - No console.log in MCP code — use process.stderr.write
 
@@ -515,9 +558,18 @@ export async function runWorkflow(
   };
 
   const resuming = task.status === 'in-progress';
-  log(`\ncrux workflow → ${task.slug} [${task.task_type}]${resuming ? ' (RESUMING)' : ''}`);
+  const executor = task.executor ?? 'auto';
+
+  log(`\ncrux workflow → ${task.slug} [${task.task_type}] executor:${executor}${resuming ? ' (RESUMING)' : ''}`);
   log(`branch: ${branch}`);
   log(`model:  ${model}\n`);
+
+  // ── Human tasks: skip entirely, surface in human_queue ────────────────────
+  if (executor === 'human') {
+    log(`  [workflow] HUMAN TASK — requires manual action`);
+    logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.human-queued', detail: task.acceptance_criteria ?? task.title, actor: 'crux-auto' });
+    return { completed: false, blocked: false, step: 'human-queued', note: `Requires human action: ${task.title}` };
+  }
 
   if (!resuming) {
     updateTaskStatus(db, proj.id, task.slug, 'in-progress');
@@ -525,6 +577,11 @@ export async function runWorkflow(
   } else {
     logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.in-progress', detail: `${task.task_type} workflow resumed`, actor: 'crux-auto' });
   }
+
+  // ── Hybrid tasks: LLM drafts, then pauses for human review ───────────────
+  // Workflow runs normally but the final mark-done step is skipped;
+  // task stays in-progress with sub_status 'draft-ready' for human approval.
+  const isHybrid = executor === 'hybrid';
 
   switch (task.task_type) {
     case 'coding':       return tddWorkflow(ctx);

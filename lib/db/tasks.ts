@@ -4,7 +4,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Task, TaskStatus, TaskType } from './types.ts';
+import type { Task, TaskStatus, TaskType, TaskExecutor } from './types.ts';
 
 export function tasksByProject(db: DatabaseSync, projectId: string): Task[] {
   return db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY id').all(projectId) as unknown as Task[];
@@ -27,15 +27,18 @@ export function insertTask(
     coverage_target?: number;
     value_score?: number;
     task_type?: TaskType;
+    executor?: TaskExecutor;
     acceptance_criteria?: string;
     files_affected?: string[];
+    files_to_create?: Array<{ path: string; signature: string; imports?: string }>;
   }
 ): Task {
   db.prepare(`
     INSERT INTO tasks
       (project_id, slug, title, description, phase, priority, duration_days,
-       coverage_target, value_score, task_type, acceptance_criteria, files_affected)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       coverage_target, value_score, task_type, executor, acceptance_criteria,
+       files_affected, files_to_create)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     opts.project_id,
     opts.slug,
@@ -47,8 +50,10 @@ export function insertTask(
     opts.coverage_target ?? null,
     opts.value_score ?? null,
     opts.task_type ?? 'coding',
+    opts.executor ?? 'auto',
     opts.acceptance_criteria ?? null,
     opts.files_affected ? JSON.stringify(opts.files_affected) : null,
+    opts.files_to_create ? JSON.stringify(opts.files_to_create) : null,
   );
   return taskBySlug(db, opts.project_id, opts.slug)!;
 }

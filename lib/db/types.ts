@@ -7,6 +7,7 @@ export type ProjectType   = 'code_repo' | 'article' | 'research' | 'freelance' |
 export type ProjectStatus = 'active' | 'stalled' | 'paused' | 'done' | 'dropped';
 export type TaskStatus    = 'open' | 'in-progress' | 'blocked' | 'done' | 'dropped';
 export type TaskType      = 'coding' | 'writing' | 'research' | 'accounting' | 'verification' | 'design' | 'other';
+export type TaskExecutor  = 'llm' | 'human' | 'hybrid' | 'auto';
 export type AuditActor    = 'human' | 'crux-auto' | 'claude';
 export type TestPhase     = 'build' | 'test-c' | 'test-python' | 'lint';
 export type RoiKind       = 'revenue' | 'cost' | 'expected';
@@ -43,8 +44,10 @@ export interface Task {
   coverage_target: number | null;
   value_score: number | null;
   task_type: TaskType;
+  executor: TaskExecutor;
   acceptance_criteria: string | null;
-  files_affected: string | null;  // JSON array
+  files_affected: string | null;   // JSON array of file paths to modify
+  files_to_create: string | null;  // JSON array of {path,signature} — new files only
   created_at: string;
 }
 

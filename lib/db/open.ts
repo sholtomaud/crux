@@ -48,4 +48,11 @@ export function applyMigrations(db: DatabaseSync): void {
   if (!cols.includes('files_affected')) {
     db.exec('ALTER TABLE tasks ADD COLUMN files_affected TEXT;');
   }
+  if (!cols.includes('executor')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN executor TEXT NOT NULL DEFAULT 'auto'
+             CHECK(executor IN ('llm','human','hybrid','auto'));`);
+  }
+  if (!cols.includes('files_to_create')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN files_to_create TEXT;');
+  }
 }
