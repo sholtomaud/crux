@@ -207,7 +207,7 @@ ${adrs.slice(0, 3).map(a => `- ADR-${a.number}: ${a.title}\n  ${(a.decision ?? '
 ## Instructions:
 1. Read the relevant files to understand what needs changing
 2. Make the required code changes using write_file
-3. Run \`npm run bundle\` (inside container: \`make bundle\`) or check with \`run_command: npx tsc --noEmit\` to verify TypeScript
+3. Verify TypeScript with \`run_command: make typecheck\` and run tests with \`run_command: make test\` — all tooling runs inside the container via make; do NOT use node/npx/tsc directly on the host
 4. When complete, call crux_task_update(slug="${task.slug}", status="done", note="brief summary")
 5. If you cannot proceed, call crux_task_update(slug="${task.slug}", status="blocked", note="reason")
 

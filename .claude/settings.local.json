@@ -12,7 +12,8 @@
       "mcp__crux__crux_adr_add",
       "mcp__crux__crux_adr_list",
       "Bash(crux report *)",
-      "mcp__crux__crux_project_context"
+      "mcp__crux__crux_project_context",
+      "Bash(make sea-macos *)"
     ]
   }
 }

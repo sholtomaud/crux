@@ -37,7 +37,7 @@ RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 .PHONY: \
 	all help bootstrap image ensure-deps \
 	dev build preview \
-	test test-agent lint format validate \
+	test test-agent typecheck lint format validate \
 	shell install ci \
 	mcpb-validate mcpb-pack \
 	bundle sea-linux sea-macos install \
@@ -107,6 +107,10 @@ preview: ensure-deps ## Preview production build
 test: ensure-deps ## Run test suite
 	@echo "🧪 Running tests..."
 	$(RUN_CI) npm test
+
+typecheck: ensure-deps ## Run TypeScript type checker (no emit)
+	@echo "🔍 Type checking..."
+	$(RUN_CI) node_modules/.bin/tsc --noEmit
 
 test-agent: ensure-deps ## Agent-compatible tests
 	@echo "🤖 Running agent tests..."
@@ -205,8 +209,9 @@ stop: ## Stop running container (if named)
 	-$(CONTAINER_BIN) stop $(IMAGE_APP)
 
 clean-volumes: ## Remove dependency cache
-	-$(CONTAINER_BIN) volume rm node_modules_cache
-	-$(CONTAINER_BIN) volume prune -f
+	-$(CONTAINER_BIN) run --rm -v node_modules_cache:/mnt alpine sh -c 'exit 0' 2>/dev/null || true
+	-$(CONTAINER_BIN) volume rm node_modules_cache 2>/dev/null || true
+	-$(CONTAINER_BIN) volume prune
 
 clean: stop clean-volumes ## Full cleanup
 	-$(CONTAINER_BIN) image rm $(IMAGE_APP)

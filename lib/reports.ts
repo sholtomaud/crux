@@ -188,7 +188,7 @@ export function reportAdr(db: DatabaseSync, projectId: string, adrId: number): s
 // ── Overview (meta Kanban) ────────────────────────────────────────────────────
 
 export function reportOverview(db: DatabaseSync, baselineRate: number = 0): string {
-  const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as Project[];
+  const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as unknown as Project[];
   const date = new Date().toISOString().slice(0, 10);
 
   const lines: string[] = [

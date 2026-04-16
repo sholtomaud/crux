@@ -37,7 +37,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     gh_issue_number  INTEGER,
     coverage_target  REAL,           -- auto-close when test_run.coverage >= this
     value_score      REAL,           -- business value 0-100, wsjf = value_score / duration_days
-    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    task_type            TEXT NOT NULL DEFAULT 'coding' CHECK(task_type IN ('coding','writing','research','accounting','verification','design','other')),
+    acceptance_criteria  TEXT,        -- testable done condition for the agent
+    files_affected       TEXT,        -- JSON array of file paths the implementation will change
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(project_id, slug)
 );
 
