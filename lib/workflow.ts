@@ -283,6 +283,64 @@ function stepPush(ctx: StepContext): boolean {
   return r.ok;
 }
 
+// ── Step: open PR (idempotent) + wait for CI checks ───────────────────────────
+
+function stepOpenPr(ctx: StepContext): { url: string | null } {
+  const { branch, log, proj } = ctx;
+  if (!proj.gh_repo) { log('  [pr] no gh_repo configured — skipping PR'); return { url: null }; }
+
+  const existing = spawnSync('gh', ['pr', 'view', branch, '--repo', proj.gh_repo, '--json', 'url'], { encoding: 'utf8' });
+  if (existing.status === 0) {
+    try {
+      const { url } = JSON.parse(existing.stdout) as { url: string };
+      log(`  [pr] existing PR: ${url}`);
+      return { url };
+    } catch { /* fall through to create */ }
+  }
+
+  const created = spawnSync('gh', ['pr', 'create', '--repo', proj.gh_repo, '--head', branch, '--fill'], { encoding: 'utf8' });
+  if (created.status !== 0) { log(`  [pr] gh pr create failed: ${created.stderr}`); return { url: null }; }
+  const url = created.stdout.trim();
+  log(`  [pr] created: ${url}`);
+  return { url };
+}
+
+interface CheckRun { status: string; conclusion: string | null; name?: string }
+
+const CI_FAILURE_CONCLUSIONS = new Set(['failure', 'timed_out', 'cancelled', 'action_required']);
+
+/** Pure decision logic — given the GH check-runs for a commit, what's the verdict? */
+export function checksConclusion(runs: CheckRun[]): 'pending' | 'success' | 'failure' | 'none' {
+  if (runs.length === 0) return 'none';
+  if (runs.some(r => r.status !== 'completed')) return 'pending';
+  if (runs.some(r => r.conclusion && CI_FAILURE_CONCLUSIONS.has(r.conclusion))) return 'failure';
+  return 'success';
+}
+
+function stepWaitForChecks(ctx: StepContext, maxAttempts = 8, intervalSeconds = 15): { outcome: 'success' | 'failure' | 'none'; output: string } {
+  const { log, proj } = ctx;
+  if (!proj.gh_repo) return { outcome: 'none', output: '(no gh_repo configured)' };
+
+  const shaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
+  const sha = shaResult.stdout?.trim();
+  if (!sha) return { outcome: 'none', output: '(could not resolve HEAD sha)' };
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const r = spawnSync('gh', ['api', `repos/${proj.gh_repo}/commits/${sha}/check-runs`], { encoding: 'utf8' });
+    if (r.status !== 0) { log(`  [ci] check-runs API error: ${r.stderr}`); return { outcome: 'none', output: r.stderr }; }
+    let runs: CheckRun[] = [];
+    try { runs = ((JSON.parse(r.stdout) as { check_runs?: CheckRun[] }).check_runs ?? []); } catch { /* leave empty */ }
+    const conclusion = checksConclusion(runs);
+    log(`  [ci] attempt ${attempt}/${maxAttempts}: ${conclusion} (${runs.length} checks)`);
+    if (conclusion !== 'pending') {
+      const output = JSON.stringify(runs.map(r => ({ name: r.name, conclusion: r.conclusion })), null, 2);
+      return { outcome: conclusion, output };
+    }
+    if (attempt < maxAttempts) spawnSync('sleep', [String(intervalSeconds)]);
+  }
+  return { outcome: 'none', output: '(CI still pending after max wait — proceeding without a verdict)' };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // WORKFLOW: coding (TDD)
 // Steps: branch → write tests → commit → implement → commit → tsc → fix loop
@@ -450,6 +508,18 @@ Output each file in full. First line of each file: // path/to/file.ts`;
   // 8. Push
   log('\n[step 8/9] push');
   stepPush(ctx);
+
+  // 8.5 Open PR + wait for CI checks (skipped entirely when no gh_repo is configured)
+  if (proj.gh_repo) {
+    log('\n[step 8.5/9] open PR + wait for CI checks');
+    stepOpenPr(ctx);
+    const { outcome, output } = stepWaitForChecks(ctx);
+    if (outcome === 'failure') {
+      updateTaskStatus(db, proj.id, task.slug, 'blocked');
+      logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.blocked', detail: `CI checks failed:\n${output.slice(0, 300)}`, actor: 'crux-auto' });
+      return { completed: false, blocked: true, step: 'ci-checks', note: output.slice(0, 300) };
+    }
+  }
 
   // 9. Mark done
   log('\n[step 9/9] mark done');
