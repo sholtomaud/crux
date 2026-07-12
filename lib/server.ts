@@ -23,6 +23,7 @@ import {
   openDb, allProjects, tasksByProject, dependenciesByProject,
   roiSummary, totalHours, projectStatus,
   taskBySlug, updateTaskStatus, projectById, updateProjectStatus, logAudit,
+  TASK_STATUSES, PROJECT_STATUSES,
 } from './db.ts';
 import type { TaskStatus, ProjectStatus } from './db.ts';
 import { computeCpm } from './cpm.ts';
@@ -111,9 +112,6 @@ function apiDbTable(db: DatabaseSync, table: string, res: http.ServerResponse): 
 // ── Write handlers (pure functions of db + args — unit-testable without HTTP) ─
 
 type ApiResult = { status: number; body: unknown };
-
-const TASK_STATUSES: TaskStatus[]       = ['open', 'in-progress', 'blocked', 'done', 'dropped'];
-const PROJECT_STATUSES: ProjectStatus[] = ['active', 'stalled', 'paused', 'done', 'dropped'];
 
 export function updateTaskStatusHandler(db: DatabaseSync, projectId: string, slug: string, status: unknown): ApiResult {
   if (typeof status !== 'string' || !TASK_STATUSES.includes(status as TaskStatus)) {

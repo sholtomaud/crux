@@ -27,6 +27,8 @@ import {
   updateProjectEnvFromFlags,
   getActiveProjectId,
   setActiveProjectId,
+  PROJECT_TYPES, PROJECT_STATUSES, TASK_STATUSES, TASK_TYPES, TASK_EXECUTORS,
+  ESTIMATED_BY_VALUES, RUN_ENVS, ROI_KINDS, TEST_PHASES, TEST_RUN_STATUSES, ADR_STATUSES,
 } from './lib/db.ts';
 import type { Project, ProjectType, RunEnv, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
 
@@ -1131,9 +1133,9 @@ async function runMcpServer(): Promise<void> {
   server.tool('crux_init', 'Bootstrap DB for current repo; optionally install SKILL.md',
     {
       name:            z.string(),
-      type:            z.enum(['code_repo','article','research','freelance','learning','personal']).default('code_repo'),
+      type:            z.enum(PROJECT_TYPES).default('code_repo'),
       install_skill:   z.boolean().default(false),
-      run_env:         z.enum(['shell','container']).default('shell'),
+      run_env:         z.enum(RUN_ENVS).default('shell'),
       verify_cmd:      z.string().optional(),
       test_cmd:        z.string().optional(),
       container_image: z.string().optional(),
@@ -1221,7 +1223,7 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
       coverage_target: z.number().optional(),
       value_score: z.number().min(0).max(100).optional().describe('Business value 0-100 for WSJF prioritisation'),
       priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
-      task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional().describe('Selects the workflow: coding=TDD, writing=draft+commit, research=ADR, verification=run tests'),
+      task_type: z.enum(TASK_TYPES).optional().describe('Selects the workflow: coding=TDD, writing=draft+commit, research=ADR, verification=run tests'),
       acceptance_criteria: z.string().optional().describe('REQUIRED for coding/writing/research. Testable done condition. For coding: name the exact functions/fields to add, what tests must assert, which DB pattern to follow.'),
       files_affected: z.array(z.string()).optional().describe('REQUIRED for coding. Exact file paths that will be modified, e.g. ["lib/db.ts","index.ts","schema.sql"]'),
     },
@@ -1261,15 +1263,15 @@ Use acceptance_criteria and files_affected to add spec to under-specified tasks 
 The agent reads these fields to write correct tests grounded in the real codebase API.`,
     {
       slug: z.string(),
-      status: z.enum(['open','in-progress','blocked','done','dropped']),
+      status: z.enum(TASK_STATUSES),
       note: z.string().optional(),
       value_score: z.number().min(0).max(100).optional(),
       priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
-      task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional(),
+      task_type: z.enum(TASK_TYPES).optional(),
       acceptance_criteria: z.string().optional().describe('Testable done condition. For coding: name exact functions/fields, what tests assert, which existing pattern to follow (e.g. "see insertRoi() in lib/db.ts").'),
       files_affected: z.array(z.string()).optional().describe('Exact file paths that will be modified'),
       actual_days: z.number().optional().describe('Actual time spent on this task — record when setting status to done'),
-      estimated_by: z.enum(['human','claude','auto']).optional().describe('Who produced the original duration_days estimate, for calibration'),
+      estimated_by: z.enum(ESTIMATED_BY_VALUES).optional().describe('Who produced the original duration_days estimate, for calibration'),
     },
     ({ slug, status, note, value_score, priority, task_type, acceptance_criteria, files_affected, actual_days, estimated_by }) => {
       try {
@@ -1374,7 +1376,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
   );
 
   server.tool('crux_test_run', 'Record build/test result + coverage; auto-close task if coverage target met',
-    { phase: z.enum(['build','test-c','test-python','lint']), status: z.enum(['pass','fail']), task_slug: z.string().optional(), coverage: z.number().optional(), commit_sha: z.string().optional() },
+    { phase: z.enum(TEST_PHASES), status: z.enum(TEST_RUN_STATUSES), task_slug: z.string().optional(), coverage: z.number().optional(), commit_sha: z.string().optional() },
     ({ phase, status, task_slug, coverage, commit_sha }) => {
       try {
         const proj = requireProject();
@@ -1450,7 +1452,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
   );
 
   server.tool('crux_roi_record', 'Log revenue or cost against a project',
-    { amount: z.number(), kind: z.enum(['revenue','cost','expected']).default('revenue'), currency: z.string().default('AUD'), probability: z.number().min(0).max(1).default(1), note: z.string().optional() },
+    { amount: z.number(), kind: z.enum(ROI_KINDS).default('revenue'), currency: z.string().default('AUD'), probability: z.number().min(0).max(1).default(1), note: z.string().optional() },
     ({ amount, kind, currency, probability, note }) => {
       try {
         const proj = requireProject();
@@ -1482,7 +1484,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
   );
 
   server.tool('crux_project_add', 'Register a new project of any type',
-    { name: z.string(), type: z.enum(['code_repo','article','research','freelance','learning','personal']).default('personal'), hourly_rate: z.number().optional() },
+    { name: z.string(), type: z.enum(PROJECT_TYPES).default('personal'), hourly_rate: z.number().optional() },
     ({ name, type, hourly_rate }) => {
       try {
         const proj = insertProject(db, { name, type, hourly_rate });
@@ -1640,7 +1642,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
       context:      z.string().optional().describe('The situation and forces that led to this decision'),
       decision:     z.string().optional().describe('The decision made and rationale'),
       consequences: z.string().optional().describe('Resulting context, trade-offs, and follow-up actions'),
-      status:       z.enum(['proposed', 'accepted', 'deprecated', 'superseded']).optional(),
+      status:       z.enum(ADR_STATUSES).optional(),
     },
     ({ title, context, decision, consequences, status }) => {
       try {
