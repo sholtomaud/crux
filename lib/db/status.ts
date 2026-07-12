@@ -22,7 +22,9 @@ export function projectStatus(db: DatabaseSync, projectId: string) {
   const blockedByDep = new Set(
     deps.filter(d => !doneIds.has(d.predecessor_id)).map(d => d.successor_id)
   );
-  const nextUnblocked = open.filter(t => !blockedByDep.has(t.id));
+  const nextUnblocked = open
+    .filter(t => !blockedByDep.has(t.id))
+    .sort((a, b) => b.priority - a.priority);
 
   return {
     project_id:     projectId,
@@ -37,6 +39,7 @@ export function projectStatus(db: DatabaseSync, projectId: string) {
       phase:     t.phase,
       executor:  t.executor,
       task_type: t.task_type,
+      priority:  t.priority,
     })),
     blockers:       blocked.map(t => ({ slug: t.slug, title: t.title })),
   };

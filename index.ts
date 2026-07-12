@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 import {
   openDb, closeDb, findRepoRoot, readProjectPointer, writeProjectPointer,
-  resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays,
+  resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays, updateTaskPriority,
   tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskCpm,
   addDependency, dependenciesByProject,
   startSession, endSession, activeSession, updateSessionContainerName,
@@ -1220,11 +1220,12 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
       duration_days: z.number().optional(),
       coverage_target: z.number().optional(),
       value_score: z.number().min(0).max(100).optional().describe('Business value 0-100 for WSJF prioritisation'),
+      priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
       task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional().describe('Selects the workflow: coding=TDD, writing=draft+commit, research=ADR, verification=run tests'),
       acceptance_criteria: z.string().optional().describe('REQUIRED for coding/writing/research. Testable done condition. For coding: name the exact functions/fields to add, what tests must assert, which DB pattern to follow.'),
       files_affected: z.array(z.string()).optional().describe('REQUIRED for coding. Exact file paths that will be modified, e.g. ["lib/db.ts","index.ts","schema.sql"]'),
     },
-    ({ slug, title, description, phase, duration_days, coverage_target, value_score, task_type, acceptance_criteria, files_affected }) => {
+    ({ slug, title, description, phase, duration_days, coverage_target, value_score, priority, task_type, acceptance_criteria, files_affected }) => {
       try {
         const proj = requireProject();
         const type = task_type ?? 'coding';
@@ -1246,7 +1247,7 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
           );
         }
 
-        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, duration_days, coverage_target, value_score, task_type: type, acceptance_criteria, files_affected });
+        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, priority, duration_days, coverage_target, value_score, task_type: type, acceptance_criteria, files_affected });
         logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.add', detail: title, actor: 'claude' });
         return ok(task);
       } catch (e: unknown) { return err((e as Error).message); }
@@ -1263,19 +1264,21 @@ The agent reads these fields to write correct tests grounded in the real codebas
       status: z.enum(['open','in-progress','blocked','done','dropped']),
       note: z.string().optional(),
       value_score: z.number().min(0).max(100).optional(),
+      priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
       task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional(),
       acceptance_criteria: z.string().optional().describe('Testable done condition. For coding: name exact functions/fields, what tests assert, which existing pattern to follow (e.g. "see insertRoi() in lib/db.ts").'),
       files_affected: z.array(z.string()).optional().describe('Exact file paths that will be modified'),
       actual_days: z.number().optional().describe('Actual time spent on this task — record when setting status to done'),
       estimated_by: z.enum(['human','claude','auto']).optional().describe('Who produced the original duration_days estimate, for calibration'),
     },
-    ({ slug, status, note, value_score, task_type, acceptance_criteria, files_affected, actual_days, estimated_by }) => {
+    ({ slug, status, note, value_score, priority, task_type, acceptance_criteria, files_affected, actual_days, estimated_by }) => {
       try {
         const proj = requireProject();
         const task = taskBySlug(db, proj.id, slug);
         if (!task) return err(`Task not found: ${slug}`);
         updateTaskStatus(db, proj.id, slug, status);
         if (value_score != null) updateTaskValueScore(db, task.id, value_score);
+        if (priority != null) updateTaskPriority(db, task.id, priority);
         if (task_type != null) updateTaskType(db, task.id, task_type);
         if (acceptance_criteria != null || files_affected != null)
           updateTaskSpec(db, task.id, { acceptance_criteria: acceptance_criteria ?? undefined, files_affected: files_affected ?? undefined });
@@ -1284,7 +1287,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
         const calibrationNote = status === 'done' && actual_days == null
           ? 'Consider recording actual_days on this call for estimation calibration.'
           : undefined;
-        return ok({ slug, status, note, value_score: value_score ?? task.value_score, task_type: task_type ?? task.task_type, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote });
+        return ok({ slug, status, note, value_score: value_score ?? task.value_score, priority: priority ?? task.priority, task_type: task_type ?? task.task_type, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );

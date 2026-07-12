@@ -71,6 +71,10 @@ export function updateTaskValueScore(db: DatabaseSync, taskId: number, valueScor
   db.prepare('UPDATE tasks SET value_score = ? WHERE id = ?').run(valueScore, taskId);
 }
 
+export function updateTaskPriority(db: DatabaseSync, taskId: number, priority: number): void {
+  db.prepare('UPDATE tasks SET priority = ? WHERE id = ?').run(priority, taskId);
+}
+
 export function updateTaskActualDays(
   db: DatabaseSync,
   taskId: number,
