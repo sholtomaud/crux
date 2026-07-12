@@ -37,7 +37,7 @@ RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 .PHONY: \
 	all help bootstrap image ensure-deps \
 	dev build preview \
-	test test-agent typecheck typecheck-errors lint format validate \
+	test test-ci test-agent typecheck typecheck-errors lint format validate \
 	shell install ci \
 	mcpb-validate mcpb-pack \
 	bundle sea-linux sea-macos install \
@@ -108,12 +108,15 @@ test: ensure-deps ## Run test suite
 	@echo "🧪 Running tests..."
 	$(RUN_CI) npm test
 
-typecheck: ensure-deps ## Run TypeScript type checker (no emit)
-	@echo "🔍 Type checking..."
-	$(RUN_CI) node_modules/.bin/tsc --noEmit
+test-ci: ensure-deps ## Run tests, output only failures + summary (LLM-friendly, no noise)
+	@$(RUN_CI) npm test 2>&1 | grep -E "^(✖|  Error|  AssertionError|ℹ (tests|fail|pass|suites))" || true
 
-typecheck-errors: ensure-deps ## Show only error file paths from tsc (for triage)
-	@$(RUN_CI) node_modules/.bin/tsc --noEmit 2>&1 | grep "error TS" | sed 's/:.*//' | sort -u || true
+typecheck: ensure-deps ## Run TypeScript type checker (no emit, tsgo/TS7)
+	@echo "🔍 Type checking..."
+	$(RUN_CI) node_modules/.bin/tsgo --noEmit
+
+typecheck-errors: ensure-deps ## Show only error file paths from tsgo (for triage)
+	@$(RUN_CI) node_modules/.bin/tsgo --noEmit 2>&1 | grep "error TS" | sed 's/:.*//' | sort -u || true
 
 test-agent: ensure-deps ## Agent-compatible tests
 	@echo "🤖 Running agent tests..."
@@ -196,6 +199,21 @@ sea-macos: ensure-deps ## Build macOS arm64 SEA → dist/crux-macos-arm64, strip
 # --------------------------------------------------
 
 ci: validate build ## CI pipeline entrypoint
+
+# --------------------------------------------------
+# E2E Tests (Playwright PWA)
+# --------------------------------------------------
+
+IMAGE_E2E := crux-e2e
+
+test-e2e: ## Build e2e image and run Playwright PWA tests (requires crux ui running on :8765)
+	@echo "🎭 Building e2e container..."
+	$(CONTAINER_BIN) build -t $(IMAGE_E2E) -f .crux/Containerfile.e2e .
+	@echo "🎭 Running Playwright e2e tests..."
+	$(CONTAINER_BIN) run -i --rm \
+		--network host \
+		-v "$(PWD):$(WORKDIR)" \
+		$(IMAGE_E2E)
 
 # --------------------------------------------------
 # Developer Utilities
