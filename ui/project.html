@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f0f0f">
+  <link rel="manifest" href="/manifest.json">
   <title>crux — Project</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -22,6 +24,8 @@
     .badge-blocked   { background: #3a1a1a; color: #f87171; }
     .badge-done      { background: #1a3a2a; color: #34d399; }
     .badge-dropped   { background: #2a2a2a; color: #888; }
+    .status-select { font: inherit; font-size: 0.75rem; background: #1c1c1c; color: #ccc;
+                      border: 1px solid #333; border-radius: 4px; padding: 0.1em 0.3em; cursor: pointer; }
     .critical-path { padding: 0.75rem 1rem; background: #1a1a1a; border-radius: 6px; font-size: 0.82rem; color: #ccc; margin-bottom: 1rem; }
     .critical-path .slug { color: #f87171; font-weight: 600; }
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
@@ -37,7 +41,17 @@
 
   <script src="/app.js"></script>
   <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+    renderNav('overview');
     const id = new URLSearchParams(location.search).get('id');
+    const TASK_STATUSES = ['open', 'in-progress', 'blocked', 'done', 'dropped'];
+
+    async function changeTaskStatus(slug, status) {
+      try {
+        await postJson(`/api/task/${id}/${slug}/status`, { status });
+        render();
+      } catch (e) { alert(`Failed to update status: ${e.message}`); render(); }
+    }
 
     async function render() {
       const content = document.getElementById('content');
@@ -95,7 +109,11 @@
                 <tr class="${criticalIds.has(t.id) ? 'critical' : ''}">
                   <td><code>${t.slug}</code></td>
                   <td>${t.title}</td>
-                  <td>${statusBadge(t.status)}</td>
+                  <td>
+                    <select class="status-select" onchange="changeTaskStatus('${t.slug}', this.value)">
+                      ${TASK_STATUSES.map(s => `<option value="${s}" ${s === t.status ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                  </td>
                   <td>${t.duration_days ?? '—'}</td>
                   <td>${t.float_days !== null ? t.float_days.toFixed(1) : '—'}</td>
                   <td>${t.gh_issue_number ? `<a href="https://github.com/${project.gh_repo}/issues/${t.gh_issue_number}" target="_blank">#${t.gh_issue_number}</a>` : '—'}</td>

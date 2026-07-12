@@ -13,6 +13,8 @@
  *   GET /api/cpm/:id   → JSON
  *   GET /api/roi       → JSON
  *   GET /api/db/:table → JSON (raw table data)
+ *   POST /api/task/:projectId/:slug/status → JSON (update task status)
+ *   POST /api/project/:id/status           → JSON (update project status)
  */
 
 import http from 'node:http';
@@ -20,10 +22,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   openDb, allProjects, tasksByProject, dependenciesByProject,
   roiSummary, totalHours, projectStatus,
+  taskBySlug, updateTaskStatus, projectById, updateProjectStatus, logAudit,
 } from './db.ts';
+import type { TaskStatus, ProjectStatus } from './db.ts';
 import { computeCpm } from './cpm.ts';
 import type { CpmNode, CpmEdge } from './cpm.ts';
 import { UI_ASSETS } from './ui-assets.ts';
+import { readCruxConfig } from './config.ts';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,17 +108,73 @@ function apiDbTable(db: DatabaseSync, table: string, res: http.ServerResponse): 
   json(res, rows);
 }
 
+// ── Write handlers (pure functions of db + args — unit-testable without HTTP) ─
+
+type ApiResult = { status: number; body: unknown };
+
+const TASK_STATUSES: TaskStatus[]       = ['open', 'in-progress', 'blocked', 'done', 'dropped'];
+const PROJECT_STATUSES: ProjectStatus[] = ['active', 'stalled', 'paused', 'done', 'dropped'];
+
+export function updateTaskStatusHandler(db: DatabaseSync, projectId: string, slug: string, status: unknown): ApiResult {
+  if (typeof status !== 'string' || !TASK_STATUSES.includes(status as TaskStatus)) {
+    return { status: 400, body: { error: `invalid status: ${String(status)}` } };
+  }
+  const task = taskBySlug(db, projectId, slug);
+  if (!task) return { status: 404, body: { error: 'task not found' } };
+  updateTaskStatus(db, projectId, slug, status as TaskStatus);
+  logAudit(db, { project_id: projectId, task_id: task.id, event: `task.${status}`, actor: 'human' });
+  return { status: 200, body: { slug, status } };
+}
+
+export function updateProjectStatusHandler(db: DatabaseSync, id: string, status: unknown): ApiResult {
+  if (typeof status !== 'string' || !PROJECT_STATUSES.includes(status as ProjectStatus)) {
+    return { status: 400, body: { error: `invalid status: ${String(status)}` } };
+  }
+  const project = projectById(db, id);
+  if (!project) return { status: 404, body: { error: 'project not found' } };
+  updateProjectStatus(db, id, status as ProjectStatus);
+  logAudit(db, { project_id: id, event: `project.${status}`, actor: 'human' });
+  return { status: 200, body: { id, status } };
+}
+
+function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch { resolve(undefined); }
+    });
+  });
+}
+
 // ── Server ────────────────────────────────────────────────────────────────────
 
-export function startServer(port = 8765, host = '127.0.0.1'): http.Server {
+export function startServer(port = readCruxConfig().ui_port, host = '127.0.0.1'): http.Server {
   const db = openDb();
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url  = new URL(req.url ?? '/', `http://${host}:${port}`);
     const path = url.pathname;
 
     // CORS headers (localhost only)
     res.setHeader('Access-Control-Allow-Origin', `http://${host}:${port}`);
+
+    // Write routes (POST)
+    if (req.method === 'POST') {
+      const taskMatch = path.match(/^\/api\/task\/([^/]+)\/([^/]+)\/status$/);
+      if (taskMatch) {
+        const body   = await readJsonBody(req) as { status?: unknown } | undefined;
+        const result = updateTaskStatusHandler(db, decodeURIComponent(taskMatch[1]), decodeURIComponent(taskMatch[2]), body?.status);
+        return json(res, result.body, result.status);
+      }
+      const projectMatch = path.match(/^\/api\/project\/([^/]+)\/status$/);
+      if (projectMatch) {
+        const body   = await readJsonBody(req) as { status?: unknown } | undefined;
+        const result = updateProjectStatusHandler(db, decodeURIComponent(projectMatch[1]), body?.status);
+        return json(res, result.body, result.status);
+      }
+    }
 
     // API routes
     if (path === '/api/overview') return apiOverview(db, res);
@@ -122,6 +183,9 @@ export function startServer(port = 8765, host = '127.0.0.1'): http.Server {
     if (path === '/api/roi')              return apiRoi(db, res);
     if (path.startsWith('/api/db/'))      return apiDbTable(db, path.slice('/api/db/'.length), res);
 
+    // PWA: allow service worker to intercept all paths under /
+    res.setHeader('Service-Worker-Allowed', '/');
+
     // Static UI files (served from bundled assets)
     if (path === '/' || path === '/index.html') return serveAsset(res, '/');
     if (path.startsWith('/project'))            return serveAsset(res, '/project.html');
@@ -129,6 +193,9 @@ export function startServer(port = 8765, host = '127.0.0.1'): http.Server {
     if (path.startsWith('/graph'))              return serveAsset(res, '/graph.html');
     if (path === '/db' || path === '/db.html')  return serveAsset(res, '/db.html');
     if (path === '/app.js')                     return serveAsset(res, '/app.js');
+    if (path === '/sw.js')                      return serveAsset(res, '/sw.js');
+    if (path === '/manifest.json')              return serveAsset(res, '/manifest.json');
+    if (path === '/icon.svg')                   return serveAsset(res, '/icon.svg');
 
     notFound(res);
   });
