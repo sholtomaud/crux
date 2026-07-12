@@ -196,7 +196,9 @@ function stepBranch(ctx: StepContext): boolean {
   const { branch, log } = ctx;
   const cwd = process.cwd();
 
-  // Check if branch already exists
+  // Resuming a task already in progress — check out its existing branch as-is.
+  // Do NOT sync main here: this branch may already have diverged from main
+  // by design (partial prior work), and that's fine.
   const existing = git(['branch', '--list', branch], cwd, log);
   if (existing.out.includes(branch)) {
     log(`  [branch] ${branch} already exists — checking out`);
@@ -204,8 +206,15 @@ function stepBranch(ctx: StepContext): boolean {
     return co.ok;
   }
 
+  // New task — sync main first so the new branch always forks from an
+  // up-to-date trunk, not from whatever HEAD a previous task left behind.
+  const mainCheckout = git(['checkout', 'main'], cwd, log);
+  if (!mainCheckout.ok) { log('  [branch] could not checkout main'); return false; }
+  const pull = git(['pull', '--ff-only', 'origin', 'main'], cwd, log);
+  if (!pull.ok) { log(`  [branch] main not fast-forwardable from origin — aborting: ${pull.out}`); return false; }
+
   const r = git(['checkout', '-b', branch], cwd, log);
-  if (r.ok) log(`  [branch] created + checked out: ${branch}`);
+  if (r.ok) log(`  [branch] created + checked out: ${branch} (from up-to-date main)`);
   return r.ok;
 }
 
