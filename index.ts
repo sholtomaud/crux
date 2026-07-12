@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 import {
   openDb, closeDb, findRepoRoot, readProjectPointer, writeProjectPointer,
-  resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore,
+  resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays,
   tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskCpm,
   addDependency, dependenciesByProject,
   startSession, endSession, activeSession, updateSessionContainerName,
@@ -1266,8 +1266,10 @@ The agent reads these fields to write correct tests grounded in the real codebas
       task_type: z.enum(['coding','writing','research','accounting','verification','design','other']).optional(),
       acceptance_criteria: z.string().optional().describe('Testable done condition. For coding: name exact functions/fields, what tests assert, which existing pattern to follow (e.g. "see insertRoi() in lib/db.ts").'),
       files_affected: z.array(z.string()).optional().describe('Exact file paths that will be modified'),
+      actual_days: z.number().optional().describe('Actual time spent on this task — record when setting status to done'),
+      estimated_by: z.enum(['human','claude','auto']).optional().describe('Who produced the original duration_days estimate, for calibration'),
     },
-    ({ slug, status, note, value_score, task_type, acceptance_criteria, files_affected }) => {
+    ({ slug, status, note, value_score, task_type, acceptance_criteria, files_affected, actual_days, estimated_by }) => {
       try {
         const proj = requireProject();
         const task = taskBySlug(db, proj.id, slug);
@@ -1277,8 +1279,12 @@ The agent reads these fields to write correct tests grounded in the real codebas
         if (task_type != null) updateTaskType(db, task.id, task_type);
         if (acceptance_criteria != null || files_affected != null)
           updateTaskSpec(db, task.id, { acceptance_criteria: acceptance_criteria ?? undefined, files_affected: files_affected ?? undefined });
+        if (actual_days != null) updateTaskActualDays(db, task.id, actual_days, estimated_by);
         logAudit(db, { project_id: proj.id, task_id: task.id, event: `task.${status}`, detail: note, actor: 'claude' });
-        return ok({ slug, status, note, value_score: value_score ?? task.value_score, task_type: task_type ?? task.task_type });
+        const calibrationNote = status === 'done' && actual_days == null
+          ? 'Consider recording actual_days on this call for estimation calibration.'
+          : undefined;
+        return ok({ slug, status, note, value_score: value_score ?? task.value_score, task_type: task_type ?? task.task_type, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );

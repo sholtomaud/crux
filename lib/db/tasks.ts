@@ -4,7 +4,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Task, TaskStatus, TaskType, TaskExecutor } from './types.ts';
+import type { Task, TaskStatus, TaskType, TaskExecutor, EstimatedBy } from './types.ts';
 
 export function tasksByProject(db: DatabaseSync, projectId: string): Task[] {
   return db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY id').all(projectId) as unknown as Task[];
@@ -69,6 +69,19 @@ export function updateTaskStatus(
 
 export function updateTaskValueScore(db: DatabaseSync, taskId: number, valueScore: number): void {
   db.prepare('UPDATE tasks SET value_score = ? WHERE id = ?').run(valueScore, taskId);
+}
+
+export function updateTaskActualDays(
+  db: DatabaseSync,
+  taskId: number,
+  actualDays: number,
+  estimatedBy?: EstimatedBy,
+): void {
+  if (estimatedBy !== undefined) {
+    db.prepare('UPDATE tasks SET actual_days = ?, estimated_by = ? WHERE id = ?').run(actualDays, estimatedBy, taskId);
+  } else {
+    db.prepare('UPDATE tasks SET actual_days = ? WHERE id = ?').run(actualDays, taskId);
+  }
 }
 
 export function updateTaskGhIssue(db: DatabaseSync, taskId: number, ghIssueNumber: number): void {

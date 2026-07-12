@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { updateTaskActualDays } from '../../lib/db/tasks.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -144,6 +145,46 @@ describe('tasks', () => {
     db.prepare("UPDATE tasks SET status = 'done' WHERE project_id = ? AND slug = ?").run(pid, 't1');
     const row = db.prepare('SELECT status FROM tasks WHERE project_id = ? AND slug = ?').get(pid, 't1') as { status: string };
     assert.equal(row.status, 'done');
+    db.close();
+  });
+
+  test('estimated_by defaults to human', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    const tid = seedTask(db, pid, 't1');
+    const row = db.prepare('SELECT estimated_by FROM tasks WHERE id = ?').get(tid) as { estimated_by: string };
+    assert.equal(row.estimated_by, 'human');
+    db.close();
+  });
+
+  test('updateTaskActualDays sets actual_days without touching estimated_by', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    const tid = seedTask(db, pid, 't1');
+    updateTaskActualDays(db, tid, 2.5);
+    const row = db.prepare('SELECT actual_days, estimated_by FROM tasks WHERE id = ?').get(tid) as { actual_days: number; estimated_by: string };
+    assert.equal(row.actual_days, 2.5);
+    assert.equal(row.estimated_by, 'human');
+    db.close();
+  });
+
+  test('updateTaskActualDays can also set estimated_by', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    const tid = seedTask(db, pid, 't1');
+    updateTaskActualDays(db, tid, 1.2, 'claude');
+    const row = db.prepare('SELECT actual_days, estimated_by FROM tasks WHERE id = ?').get(tid) as { actual_days: number; estimated_by: string };
+    assert.equal(row.actual_days, 1.2);
+    assert.equal(row.estimated_by, 'claude');
+    db.close();
+  });
+
+  test('invalid estimated_by is rejected', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    assert.throws(() => {
+      db.prepare("INSERT INTO tasks (project_id, slug, title, estimated_by) VALUES (?, ?, ?, ?)").run(pid, 'bad', 'Bad', 'robot');
+    });
     db.close();
   });
 });

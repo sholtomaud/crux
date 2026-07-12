@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { applyMigrations } from '../../lib/db/open.ts';
-import { insertProject, allProjects, projectById } from '../../lib/db/projects.ts';
+import { insertProject, allProjects, projectById, updateProjectDailyCost, setDefaultDailyCost, resolveDailyCost } from '../../lib/db/projects.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -106,5 +106,29 @@ describe('project_number', () => {
     assert.ok(p1.project_number >= 1, 'p1 should have a project_number');
     assert.ok(p2.project_number >= 1, 'p2 should have a project_number');
     assert.notEqual(p1.project_number, p2.project_number, 'numbers must be unique');
+  });
+});
+
+describe('daily_cost', () => {
+  test('null by default when no override or global default is set', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'personal' });
+    assert.equal(resolveDailyCost(db, p), null);
+  });
+
+  test('falls back to global default_daily_cost when project has no override', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'personal' });
+    setDefaultDailyCost(db, 120);
+    assert.equal(resolveDailyCost(db, p), 120);
+  });
+
+  test('per-project override wins over the global default', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'personal' });
+    setDefaultDailyCost(db, 120);
+    updateProjectDailyCost(db, p.id, 200);
+    const updated = projectById(db, p.id)!;
+    assert.equal(resolveDailyCost(db, updated), 200);
   });
 });

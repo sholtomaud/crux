@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 
 import type { Project, ProjectType, ProjectStatus, RunEnv } from './types.ts';
+import { getConfig, setConfig } from './config.ts';
 
 export function projectById(db: DatabaseSync, id: string): Project | null {
   return (db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project) ?? null;
@@ -37,6 +38,21 @@ export function updateProjectStatus(db: DatabaseSync, id: string, status: Projec
 
 export function updateProjectGhRepo(db: DatabaseSync, id: string, ghRepo: string): void {
   db.prepare('UPDATE projects SET gh_repo = ? WHERE id = ?').run(ghRepo, id);
+}
+
+export function updateProjectDailyCost(db: DatabaseSync, id: string, dailyCost: number | null): void {
+  db.prepare('UPDATE projects SET daily_cost = ? WHERE id = ?').run(dailyCost, id);
+}
+
+export function setDefaultDailyCost(db: DatabaseSync, amount: number): void {
+  setConfig(db, 'default_daily_cost', String(amount));
+}
+
+/** Per-project daily_cost overrides the global default_daily_cost config key; null if neither is set. */
+export function resolveDailyCost(db: DatabaseSync, project: Project): number | null {
+  if (project.daily_cost !== null) return project.daily_cost;
+  const fallback = getConfig(db, 'default_daily_cost');
+  return fallback !== null ? Number(fallback) : null;
 }
 
 export function updateProjectEnv(

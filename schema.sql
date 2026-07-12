@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS projects (
     gh_sync         INTEGER NOT NULL DEFAULT 0 CHECK(gh_sync IN (0,1)),
     sheets_id       TEXT,               -- Google Sheets spreadsheet ID or NULL
     hourly_rate      REAL,               -- opportunity cost baseline (per project override)
+    daily_cost       REAL,               -- user's daily operating cost override (NULL = use global_config default_daily_cost)
     run_env          TEXT NOT NULL DEFAULT 'shell' CHECK(run_env IN ('shell','container')),
     verify_cmd       TEXT,               -- command to verify/typecheck (null = skip)
     test_cmd         TEXT,               -- command to run tests (null = skip)
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     status           TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in-progress','blocked','done','dropped')),
     priority         INTEGER NOT NULL DEFAULT 0,
     duration_days    REAL,
+    actual_days      REAL,              -- actual time spent, recorded on completion
+    estimated_by     TEXT NOT NULL DEFAULT 'human' CHECK(estimated_by IN ('human','claude','auto')),
     -- CPM fields (computed, stored for reporting)
     early_start      REAL,
     early_finish     REAL,

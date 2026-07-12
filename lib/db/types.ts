@@ -8,6 +8,7 @@ export type ProjectStatus = 'active' | 'stalled' | 'paused' | 'done' | 'dropped'
 export type TaskStatus    = 'open' | 'in-progress' | 'blocked' | 'done' | 'dropped';
 export type TaskType      = 'coding' | 'writing' | 'research' | 'accounting' | 'verification' | 'design' | 'other';
 export type TaskExecutor  = 'llm' | 'human' | 'hybrid' | 'auto';
+export type EstimatedBy   = 'human' | 'claude' | 'auto';
 export type AuditActor    = 'human' | 'crux-auto' | 'claude';
 export type TestPhase     = 'build' | 'test-c' | 'test-python' | 'lint';
 export type RoiKind       = 'revenue' | 'cost' | 'expected';
@@ -24,6 +25,7 @@ export interface Project {
   gh_sync: number;
   sheets_id: string | null;
   hourly_rate: number | null;
+  daily_cost: number | null;
   run_env: RunEnv;
   verify_cmd: string | null;
   test_cmd: string | null;
@@ -41,6 +43,8 @@ export interface Task {
   status: TaskStatus;
   priority: number;
   duration_days: number | null;
+  actual_days: number | null;
+  estimated_by: EstimatedBy;
   early_start: number | null;
   early_finish: number | null;
   late_start: number | null;

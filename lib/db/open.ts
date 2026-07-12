@@ -59,6 +59,13 @@ export function applyMigrations(db: DatabaseSync): void {
   if (!taskCols.includes('files_to_create')) {
     db.exec('ALTER TABLE tasks ADD COLUMN files_to_create TEXT;');
   }
+  if (!taskCols.includes('actual_days')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN actual_days REAL;');
+  }
+  if (!taskCols.includes('estimated_by')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN estimated_by TEXT NOT NULL DEFAULT 'human'
+             CHECK(estimated_by IN ('human','claude','auto'));`);
+  }
 
   // projects migrations
   if (!projCols.includes('project_number')) {
@@ -83,6 +90,9 @@ export function applyMigrations(db: DatabaseSync): void {
   }
   if (!projCols.includes('container_image')) {
     db.exec('ALTER TABLE projects ADD COLUMN container_image TEXT;');
+  }
+  if (!projCols.includes('daily_cost')) {
+    db.exec('ALTER TABLE projects ADD COLUMN daily_cost REAL;');
   }
 
   // sessions migrations
