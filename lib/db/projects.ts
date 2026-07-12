@@ -5,14 +5,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 
-import type { Project, ProjectType, ProjectStatus } from './types.ts';
+import type { Project, ProjectType, ProjectStatus, RunEnv } from './types.ts';
 
 export function projectById(db: DatabaseSync, id: string): Project | null {
   return (db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project) ?? null;
 }
 
 export function allProjects(db: DatabaseSync): Project[] {
-  return db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as unknown as Project[];
+  return db.prepare('SELECT * FROM projects ORDER BY project_number ASC').all() as unknown as Project[];
 }
 
 export function insertProject(
@@ -24,6 +24,10 @@ export function insertProject(
     INSERT INTO projects (id, name, type, gh_repo, hourly_rate)
     VALUES (?, ?, ?, ?, ?)
   `).run(id, opts.name, opts.type, opts.gh_repo ?? null, opts.hourly_rate ?? null);
+  db.prepare(`
+    UPDATE projects SET project_number = (SELECT COALESCE(MAX(project_number), 0) + 1 FROM projects)
+    WHERE id = ? AND project_number IS NULL
+  `).run(id);
   return projectById(db, id)!;
 }
 
@@ -33,4 +37,33 @@ export function updateProjectStatus(db: DatabaseSync, id: string, status: Projec
 
 export function updateProjectGhRepo(db: DatabaseSync, id: string, ghRepo: string): void {
   db.prepare('UPDATE projects SET gh_repo = ? WHERE id = ?').run(ghRepo, id);
+}
+
+export function updateProjectEnv(
+  db: DatabaseSync,
+  id: string,
+  opts: { run_env?: RunEnv; verify_cmd?: string | null; test_cmd?: string | null; container_image?: string | null }
+): void {
+  if (opts.run_env        !== undefined) db.prepare('UPDATE projects SET run_env = ? WHERE id = ?').run(opts.run_env, id);
+  if (opts.verify_cmd     !== undefined) db.prepare('UPDATE projects SET verify_cmd = ? WHERE id = ?').run(opts.verify_cmd, id);
+  if (opts.test_cmd       !== undefined) db.prepare('UPDATE projects SET test_cmd = ? WHERE id = ?').run(opts.test_cmd, id);
+  if (opts.container_image !== undefined) db.prepare('UPDATE projects SET container_image = ? WHERE id = ?').run(opts.container_image, id);
+}
+
+/**
+ * Resolves CLI flags into an updateProjectEnv() call. A flag left `undefined`
+ * (not passed on argv) leaves the existing DB value untouched — passing the
+ * literal string 'none' is the explicit way to clear a field to null.
+ */
+export function updateProjectEnvFromFlags(
+  db: DatabaseSync,
+  id: string,
+  flags: { runEnv?: string; verifyCmd?: string; testCmd?: string; containerImage?: string }
+): void {
+  const opts: { run_env?: RunEnv; verify_cmd?: string | null; test_cmd?: string | null; container_image?: string | null } = {};
+  if (flags.runEnv        !== undefined) opts.run_env         = flags.runEnv as RunEnv;
+  if (flags.verifyCmd     !== undefined) opts.verify_cmd      = flags.verifyCmd     === 'none' ? null : flags.verifyCmd;
+  if (flags.testCmd       !== undefined) opts.test_cmd        = flags.testCmd       === 'none' ? null : flags.testCmd;
+  if (flags.containerImage !== undefined) opts.container_image = flags.containerImage === 'none' ? null : flags.containerImage;
+  updateProjectEnv(db, id, opts);
 }

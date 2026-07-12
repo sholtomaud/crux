@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#0f0f0f"/>
+  <!-- Critical path nodes -->
+  <circle cx="80"  cy="256" r="36" fill="none" stroke="#34d399" stroke-width="12"/>
+  <circle cx="220" cy="140" r="36" fill="none" stroke="#60a5fa" stroke-width="12"/>
+  <circle cx="220" cy="372" r="36" fill="none" stroke="#60a5fa" stroke-width="12"/>
+  <circle cx="360" cy="256" r="36" fill="none" stroke="#60a5fa" stroke-width="12"/>
+  <circle cx="432" cy="256" r="36" fill="#34d399" stroke="#34d399" stroke-width="12"/>
+  <!-- Edges -->
+  <line x1="116" y1="244" x2="184" y2="164" stroke="#34d399" stroke-width="6" stroke-linecap="round"/>
+  <line x1="116" y1="268" x2="184" y2="348" stroke="#888"    stroke-width="4" stroke-linecap="round"/>
+  <line x1="256" y1="156" x2="324" y2="236" stroke="#34d399" stroke-width="6" stroke-linecap="round"/>
+  <line x1="256" y1="356" x2="324" y2="276" stroke="#888"    stroke-width="4" stroke-linecap="round"/>
+  <line x1="396" y1="256" x2="396" y2="256" stroke="#34d399" stroke-width="6" stroke-linecap="round"/>
+  <line x1="396" y1="256" x2="432" y2="256" stroke="#34d399" stroke-width="6" stroke-linecap="round"/>
+</svg>

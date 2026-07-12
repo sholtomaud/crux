@@ -15,7 +15,8 @@
       "mcp__crux__crux_project_context",
       "Bash(make sea-macos *)",
       "Bash(make typecheck *)",
-      "Bash(make test *)"
+      "Bash(make test *)",
+      "Bash(make test-ci *)"
     ]
   }
 }

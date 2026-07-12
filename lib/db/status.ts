@@ -31,7 +31,13 @@ export function projectStatus(db: DatabaseSync, projectId: string) {
     in_progress:    inProgress.length,
     blocked:        blocked.length,
     done:           done.length,
-    next_unblocked: nextUnblocked.slice(0, 10).map(t => ({ slug: t.slug, title: t.title, phase: t.phase })),
+    next_unblocked: nextUnblocked.slice(0, 10).map(t => ({
+      slug:      t.slug,
+      title:     t.title,
+      phase:     t.phase,
+      executor:  t.executor,
+      task_type: t.task_type,
+    })),
     blockers:       blocked.map(t => ({ slug: t.slug, title: t.title })),
   };
 }

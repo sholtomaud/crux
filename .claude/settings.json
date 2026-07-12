@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make typecheck-errors *)",
+      "mcp__crux__crux_project_add",
+      "mcp__crux__crux_project_link",
+      "Bash(container system *)",
+      "mcp__crux__crux_switch",
+      "mcp__crux__crux_test_run",
+      "Bash(kill 46931 46274 44662)"
+    ],
+    "additionalDirectories": [
+      "/Users/sholtomaud/Development/crux/examples"
+    ]
+  }
+}

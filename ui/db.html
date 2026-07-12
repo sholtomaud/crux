@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f0f0f">
+  <link rel="manifest" href="/manifest.json">
   <title>crux — DB Explorer</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,6 +31,8 @@
 
   <script src="/app.js"></script>
   <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+    renderNav('db');
     const TABLES = ['projects','tasks','dependencies','sessions','roi_records','test_runs','audit','adrs','task_adrs'];
     let active = null;
 

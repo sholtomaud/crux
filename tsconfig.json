@@ -8,5 +8,6 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "lib/**/*.ts", "test/**/*.ts"]
+  "include": ["index.ts", "lib/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/e2e/**/*.ts"]
 }

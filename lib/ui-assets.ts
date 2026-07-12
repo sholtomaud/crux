@@ -11,11 +11,14 @@ const _dirname = dirname(fileURLToPath(import.meta.url));
 const UI_DIR   = join(_dirname, '..', 'ui');
 
 export const UI_ASSETS: Record<string, { content: string; mime: string }> = {
-  '/':             { content: readFileSync(join(UI_DIR, 'index.html'),   'utf8'), mime: 'text/html; charset=utf-8' },
-  '/index.html':   { content: readFileSync(join(UI_DIR, 'index.html'),   'utf8'), mime: 'text/html; charset=utf-8' },
-  '/project.html': { content: readFileSync(join(UI_DIR, 'project.html'), 'utf8'), mime: 'text/html; charset=utf-8' },
-  '/roi.html':     { content: readFileSync(join(UI_DIR, 'roi.html'),     'utf8'), mime: 'text/html; charset=utf-8' },
-  '/graph.html':   { content: readFileSync(join(UI_DIR, 'graph.html'),   'utf8'), mime: 'text/html; charset=utf-8' },
-  '/db.html':      { content: readFileSync(join(UI_DIR, 'db.html'),      'utf8'), mime: 'text/html; charset=utf-8' },
-  '/app.js':       { content: readFileSync(join(UI_DIR, 'app.js'),       'utf8'), mime: 'application/javascript; charset=utf-8' },
+  '/':              { content: readFileSync(join(UI_DIR, 'index.html'),    'utf8'), mime: 'text/html; charset=utf-8' },
+  '/index.html':    { content: readFileSync(join(UI_DIR, 'index.html'),    'utf8'), mime: 'text/html; charset=utf-8' },
+  '/project.html':  { content: readFileSync(join(UI_DIR, 'project.html'),  'utf8'), mime: 'text/html; charset=utf-8' },
+  '/roi.html':      { content: readFileSync(join(UI_DIR, 'roi.html'),      'utf8'), mime: 'text/html; charset=utf-8' },
+  '/graph.html':    { content: readFileSync(join(UI_DIR, 'graph.html'),    'utf8'), mime: 'text/html; charset=utf-8' },
+  '/db.html':       { content: readFileSync(join(UI_DIR, 'db.html'),       'utf8'), mime: 'text/html; charset=utf-8' },
+  '/app.js':        { content: readFileSync(join(UI_DIR, 'app.js'),        'utf8'), mime: 'application/javascript; charset=utf-8' },
+  '/sw.js':         { content: readFileSync(join(UI_DIR, 'sw.js'),         'utf8'), mime: 'application/javascript; charset=utf-8' },
+  '/manifest.json': { content: readFileSync(join(UI_DIR, 'manifest.json'), 'utf8'), mime: 'application/manifest+json; charset=utf-8' },
+  '/icon.svg':      { content: readFileSync(join(UI_DIR, 'icon.svg'),      'utf8'), mime: 'image/svg+xml' },
 };

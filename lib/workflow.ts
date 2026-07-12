@@ -14,54 +14,16 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from './ask.ts';
-import { updateTaskStatus, logAudit, listAdrs, dependenciesByProject, tasksByProject } from './db.ts';
+import { updateTaskStatus, logAudit, listAdrs, dependenciesByProject, tasksByProject, activeSession } from './db.ts';
 import type { Project, Task, TaskType } from './db.ts';
+import { readDbSignatures, readTestPattern } from './codebase.ts';
 
 // ── Codebase grounding helpers ────────────────────────────────────────────────
-
-/** Read one existing unit test as a concrete pattern example */
-function readTestPattern(cwd: string): string {
-  const unitDir = join(cwd, 'test', 'unit');
-  if (!existsSync(unitDir)) return '';
-  const files = readdirSync(unitDir).filter(f => f.endsWith('.test.ts'));
-  if (!files.length) return '';
-  const content = readFileSync(join(unitDir, files[0]), 'utf8');
-  return content.slice(0, 2000); // first 2000 chars is enough to show the pattern
-}
-
-/** Extract export signatures from lib/db/*.ts domain modules (or fallback to lib/db.ts) */
-function readDbSignatures(cwd: string): string {
-  const dbDir = join(cwd, 'lib', 'db');
-  if (existsSync(dbDir)) {
-    const domainFiles = readdirSync(dbDir)
-      .filter(f => f.endsWith('.ts') && f !== 'index.ts')
-      .sort();
-    const sigs: string[] = [];
-    for (const f of domainFiles) {
-      const lines = readFileSync(join(dbDir, f), 'utf8').split('\n');
-      const exports = lines.filter(l =>
-        l.startsWith('export function') || l.startsWith('export interface') ||
-        l.startsWith('export type') || l.startsWith('export const')
-      );
-      if (exports.length) {
-        sigs.push(`// lib/db/${f}`);
-        sigs.push(...exports);
-      }
-    }
-    return sigs.join('\n').slice(0, 3000);
-  }
-  // fallback: monolith
-  const p = join(cwd, 'lib', 'db.ts');
-  if (!existsSync(p)) return '';
-  return readFileSync(p, 'utf8').split('\n')
-    .filter(l => l.startsWith('export function') || l.startsWith('export interface') ||
-                 l.startsWith('export type') || l.startsWith('export const'))
-    .join('\n').slice(0, 3000);
-}
+// readDbSignatures and readTestPattern imported from lib/codebase.ts
 
 /** Read the first N lines of a file for context */
 function readFileHead(filePath: string, lines = 80): string {
@@ -94,12 +56,13 @@ export interface WorkflowResult {
 }
 
 interface StepContext {
-  db:       DatabaseSync;
-  proj:     Project;
-  task:     Task;
-  branch:   string;
-  log:      (s: string) => void;
-  llm:      LlmConfig;
+  db:            DatabaseSync;
+  proj:          Project;
+  task:          Task;
+  branch:        string;
+  log:           (s: string) => void;
+  llm:           LlmConfig;
+  containerName: string | null;
 }
 
 interface LlmConfig {
@@ -121,6 +84,17 @@ function run(cmd: string, cwd: string, log: (s: string) => void): { ok: boolean;
   const r = spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf8', timeout: 120_000 });
   const out = ((r.stdout ?? '') + (r.stderr ?? '')).trim();
   return { ok: r.status === 0, out };
+}
+
+/** Run a command either in a session container (exec) or directly in the shell */
+function runInEnv(cmd: string, cwd: string, containerName: string | null, log: (s: string) => void): { ok: boolean; out: string } {
+  if (containerName) {
+    const r = spawnSync('container', ['exec', containerName, 'sh', '-c', cmd], { encoding: 'utf8', timeout: 120_000 });
+    const out = ((r.stdout ?? '') + (r.stderr ?? '')).trim();
+    if (r.error) log(`  [container] exec error: ${r.error.message}`);
+    return { ok: r.status === 0, out };
+  }
+  return run(cmd, cwd, log);
 }
 
 // ── LLM call (single focused prompt, fresh context) ───────────────────────────
@@ -250,24 +224,54 @@ function stepCommit(ctx: StepContext, message: string, files: string[]): boolean
 
 // ── Step: run tests ───────────────────────────────────────────────────────────
 
+/** Filter raw `make test` output to failures + summary only */
+function filterTestOutput(raw: string): string {
+  return raw.split('\n')
+    .filter(l => /^(✖|  Error:|  AssertionError|ℹ (tests|fail|pass|suites))/.test(l))
+    .join('\n');
+}
+
+/** Filter raw `make typecheck` output to error lines only */
+function filterTscOutput(raw: string): string {
+  return raw.split('\n')
+    .filter(l => l.includes('error TS'))
+    .join('\n');
+}
+
 function stepRunTests(ctx: StepContext): { ok: boolean; output: string } {
-  const { log } = ctx;
-  log('  [test] make test (inside container)...');
-  // All tooling runs in the container — host has no node/npm
-  const r = run('make test 2>&1', process.cwd(), log);
+  const { log, proj, containerName } = ctx;
+  const cmd = proj.test_cmd ?? (proj.run_env === 'shell' ? 'make test-ci 2>&1' : null);
+  if (!cmd) {
+    if (proj.run_env === 'container') {
+      log('  [test] run_env=container but no test_cmd configured — cannot verify, blocking');
+      return { ok: false, output: 'run_env=container requires test_cmd (crux project env --test-cmd "...")' };
+    }
+    log('  [test] no test_cmd — skipped');
+    return { ok: true, output: '(skipped: no test_cmd)' };
+  }
+  log(`  [test] ${cmd}...`);
+  const r = runInEnv(cmd, process.cwd(), containerName, log);
   log(`  [test] ${r.ok ? 'PASS' : 'FAIL'}`);
-  return { ok: r.ok, output: r.out.slice(0, 3000) };
+  return { ok: r.ok, output: filterTestOutput(r.out).slice(0, 2000) };
 }
 
 // ── Step: tsc check ───────────────────────────────────────────────────────────
 
 function stepTsc(ctx: StepContext): { ok: boolean; output: string } {
-  const { log } = ctx;
-  log('  [tsc] make typecheck (inside container)...');
-  // All tooling runs in the container — host has no tsc/npx
-  const r = run('make typecheck 2>&1', process.cwd(), log);
+  const { log, proj, containerName } = ctx;
+  const cmd = proj.verify_cmd ?? (proj.run_env === 'shell' ? 'make typecheck 2>&1' : null);
+  if (!cmd) {
+    if (proj.run_env === 'container') {
+      log('  [tsc] run_env=container but no verify_cmd configured — cannot verify, blocking');
+      return { ok: false, output: 'run_env=container requires verify_cmd (crux project env --verify-cmd "...")' };
+    }
+    log('  [tsc] no verify_cmd — skipped');
+    return { ok: true, output: '(skipped: no verify_cmd)' };
+  }
+  log(`  [tsc] ${cmd}...`);
+  const r = runInEnv(cmd, process.cwd(), containerName, log);
   log(`  [tsc] ${r.ok ? 'OK' : 'errors'}`);
-  return { ok: r.ok, output: r.out.slice(0, 2000) };
+  return { ok: r.ok, output: filterTscOutput(r.out).slice(0, 2000) };
 }
 
 // ── Step: push branch ─────────────────────────────────────────────────────────
@@ -361,15 +365,34 @@ Output each file in full. First line of each file: // path/to/file.ts`;
   if (!implCode) return { completed: false, blocked: true, step: 'write-impl', note: 'LLM unavailable' };
 
   // Parse and write files (// path.ts pattern)
+  // Guard: only write files listed in files_to_create, or genuinely new paths.
+  // Never overwrite an existing file unless it's explicitly in files_affected.
+  const allowedNew = new Set(newFiles.map(f => f.path));
+  const allowedEdit = new Set(affectedFiles(task));
+  const cwd = process.cwd();
+
   const implFiles: string[] = [];
   const fileBlocks = implCode.split(/(?=^\/\/ \S)/m).filter(b => b.trim());
   for (const block of fileBlocks) {
     const pathMatch = block.match(/^\/\/ ([\w\-/.]+\.[a-z]+)/m);
     if (!pathMatch) continue;
     const filePath = pathMatch[1];
-    const content  = block.replace(/^\/\/ [\w\-/.]+\.[a-z]+\n/, '');
-    run(`mkdir -p $(dirname ${filePath})`, process.cwd(), log);
-    run(`cat > ${filePath} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, process.cwd(), log);
+    const exists   = existsSync(join(cwd, filePath));
+
+    // Reject writes to existing files not explicitly allowed
+    if (exists && !allowedEdit.has(filePath)) {
+      log(`  [guard] BLOCKED write to existing file: ${filePath} (not in files_affected)`);
+      continue;
+    }
+    // If files_to_create was specified, only allow those new paths
+    if (!exists && allowedNew.size > 0 && !allowedNew.has(filePath)) {
+      log(`  [guard] BLOCKED new file not in files_to_create: ${filePath}`);
+      continue;
+    }
+
+    const content = block.replace(/^\/\/ [\w\-/.]+\.[a-z]+\n/, '');
+    run(`mkdir -p $(dirname ${filePath})`, cwd, log);
+    run(`cat > ${filePath} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, cwd, log);
     implFiles.push(filePath);
     log(`  [write] ${filePath}`);
   }
@@ -552,9 +575,13 @@ export async function runWorkflow(
   const log = (s: string) => process.stderr.write(s + '\n');
   const branch = `feat/${task.slug}`;
 
+  const sess = activeSession(db, proj.id);
+  const containerName = sess?.container_name ?? null;
+
   const ctx: StepContext = {
     db, proj, task, branch, log,
     llm: { endpoint, model, ctxTokens: opts.ctxTokens ?? 6000 },
+    containerName,
   };
 
   const resuming = task.status === 'in-progress';

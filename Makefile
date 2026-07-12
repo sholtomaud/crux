@@ -35,6 +35,7 @@ RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 	$(IMAGE_APP)
 
 .PHONY: \
+	start stop clean clean-volumes \
 	all help bootstrap image ensure-deps \
 	dev build preview \
 	test test-ci test-agent typecheck typecheck-errors lint format validate \
@@ -49,6 +50,10 @@ RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 
 all: validate ## Run full validation suite
 
+start: ## Start the Apple container system daemon
+	$(CONTAINER_BIN) system start
+
+
 # --------------------------------------------------
 # Help (self-documenting CLI)
 # --------------------------------------------------
@@ -61,7 +66,7 @@ help: ## Show available commands
 # Container Image
 # --------------------------------------------------
 
-image: ## Build dev container image
+image: start ## Build dev container image
 	@echo "🔨 Building container image..."
 	$(CONTAINER_BIN) build -t $(IMAGE_APP) .
 
@@ -77,7 +82,7 @@ deps-update: ## Update package-lock.json inside container (run after adding new 
 	@echo "📦 Updating dependencies..."
 	$(RUN_CI) npm install
 
-install: test sea-macos ## Run tests, build macOS SEA, install to ~/bin, configure PATH + VSCode MCP
+install: start test sea-macos ## Run tests, build macOS SEA, install to ~/bin, configure PATH + VSCode MCP
 	@# PATH
 	@grep -q '$$HOME/bin\|~/bin' $(HOME)/.zshrc 2>/dev/null || \
 		{ echo 'export PATH="$$HOME/bin:$$PATH"' >> $(HOME)/.zshrc && \
@@ -96,7 +101,7 @@ dev: ensure-deps ## Start Vite dev server
 	@echo "🚀 Starting dev server..."
 	$(RUN) npm run dev
 
-build: ensure-deps ## Production build
+build: start ensure-deps ## Production build
 	@echo "🏗️ Building application..."
 	$(RUN) npm run build
 
@@ -172,7 +177,7 @@ sea-linux: ensure-deps ## Build Linux arm64 SEA → dist/crux-linux-arm64
 		chmod +x dist/crux-linux-arm64'
 	@echo "✅  dist/crux-linux-arm64 ready"
 
-sea-macos: ensure-deps ## Build macOS arm64 SEA → dist/crux-macos-arm64, strip quarantine, install to ~/bin
+sea-macos: start ensure-deps ## Build macOS arm64 SEA → dist/crux-macos-arm64, strip quarantine, install to ~/bin
 	@echo "Building macOS arm64 SEA..."
 	$(RUN_BIG) sh -c '\
 		mkdir -p dist && \

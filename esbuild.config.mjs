@@ -19,13 +19,16 @@ const inlineUiPlugin = {
   setup(build) {
     build.onLoad({ filter: /lib\/ui-assets\.ts$/ }, () => {
       const files = [
-        { key: '/',             path: 'ui/index.html',   mime: 'text/html; charset=utf-8' },
-        { key: '/index.html',   path: 'ui/index.html',   mime: 'text/html; charset=utf-8' },
-        { key: '/project.html', path: 'ui/project.html', mime: 'text/html; charset=utf-8' },
-        { key: '/roi.html',     path: 'ui/roi.html',     mime: 'text/html; charset=utf-8' },
-        { key: '/graph.html',   path: 'ui/graph.html',   mime: 'text/html; charset=utf-8' },
-        { key: '/db.html',      path: 'ui/db.html',      mime: 'text/html; charset=utf-8' },
-        { key: '/app.js',       path: 'ui/app.js',       mime: 'application/javascript; charset=utf-8' },
+        { key: '/',              path: 'ui/index.html',    mime: 'text/html; charset=utf-8' },
+        { key: '/index.html',    path: 'ui/index.html',    mime: 'text/html; charset=utf-8' },
+        { key: '/project.html',  path: 'ui/project.html',  mime: 'text/html; charset=utf-8' },
+        { key: '/roi.html',      path: 'ui/roi.html',      mime: 'text/html; charset=utf-8' },
+        { key: '/graph.html',    path: 'ui/graph.html',    mime: 'text/html; charset=utf-8' },
+        { key: '/db.html',       path: 'ui/db.html',       mime: 'text/html; charset=utf-8' },
+        { key: '/app.js',        path: 'ui/app.js',        mime: 'application/javascript; charset=utf-8' },
+        { key: '/sw.js',         path: 'ui/sw.js',         mime: 'application/javascript; charset=utf-8' },
+        { key: '/manifest.json', path: 'ui/manifest.json', mime: 'application/manifest+json; charset=utf-8' },
+        { key: '/icon.svg',      path: 'ui/icon.svg',      mime: 'image/svg+xml' },
       ];
       const entries = files.map(f =>
         `${JSON.stringify(f.key)}: { content: ${JSON.stringify(readFileSync(resolve(f.path), 'utf8'))}, mime: ${JSON.stringify(f.mime)} }`

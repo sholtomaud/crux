@@ -5,15 +5,20 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS projects (
-    id           TEXT PRIMARY KEY,   -- UUID
-    name         TEXT NOT NULL,
-    type         TEXT NOT NULL CHECK(type IN ('code_repo','article','research','freelance','learning','personal')),
-    status       TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','stalled','paused','done','dropped')),
-    gh_repo      TEXT,               -- owner/repo or NULL
-    gh_sync      INTEGER NOT NULL DEFAULT 0 CHECK(gh_sync IN (0,1)),
-    sheets_id    TEXT,               -- Google Sheets spreadsheet ID or NULL
-    hourly_rate  REAL,               -- opportunity cost baseline (per project override)
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    id              TEXT PRIMARY KEY,   -- UUID
+    project_number  INTEGER UNIQUE,     -- stable 1-based display number (gaps from drops are OK)
+    name            TEXT NOT NULL,
+    type            TEXT NOT NULL CHECK(type IN ('code_repo','article','research','freelance','learning','personal')),
+    status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','stalled','paused','done','dropped')),
+    gh_repo         TEXT,               -- owner/repo or NULL
+    gh_sync         INTEGER NOT NULL DEFAULT 0 CHECK(gh_sync IN (0,1)),
+    sheets_id       TEXT,               -- Google Sheets spreadsheet ID or NULL
+    hourly_rate      REAL,               -- opportunity cost baseline (per project override)
+    run_env          TEXT NOT NULL DEFAULT 'shell' CHECK(run_env IN ('shell','container')),
+    verify_cmd       TEXT,               -- command to verify/typecheck (null = skip)
+    test_cmd         TEXT,               -- command to run tests (null = skip)
+    container_image  TEXT,               -- image name when run_env='container' and no Containerfile
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -65,7 +70,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at  TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at    TEXT,
     note        TEXT,
-    minutes     REAL   -- computed on session end
+    minutes          REAL,              -- computed on session end
+    container_name   TEXT               -- running container name if run_env='container'
 );
 
 CREATE TABLE IF NOT EXISTS roi_records (
@@ -112,6 +118,12 @@ CREATE TABLE IF NOT EXISTS adrs (
     consequences TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(project_id, number)
+);
+
+CREATE TABLE IF NOT EXISTS global_config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Useful indexes

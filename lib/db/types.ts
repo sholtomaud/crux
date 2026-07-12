@@ -12,8 +12,11 @@ export type AuditActor    = 'human' | 'crux-auto' | 'claude';
 export type TestPhase     = 'build' | 'test-c' | 'test-python' | 'lint';
 export type RoiKind       = 'revenue' | 'cost' | 'expected';
 
+export type RunEnv = 'shell' | 'container';
+
 export interface Project {
   id: string;
+  project_number: number;
   name: string;
   type: ProjectType;
   status: ProjectStatus;
@@ -21,6 +24,10 @@ export interface Project {
   gh_sync: number;
   sheets_id: string | null;
   hourly_rate: number | null;
+  run_env: RunEnv;
+  verify_cmd: string | null;
+  test_cmd: string | null;
+  container_image: string | null;
   created_at: string;
 }
 
@@ -58,6 +65,7 @@ export interface Session {
   ended_at: string | null;
   note: string | null;
   minutes: number | null;
+  container_name: string | null;
 }
 
 export interface RoiRecord {

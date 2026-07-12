@@ -30,6 +30,10 @@ export function activeSession(db: DatabaseSync, projectId: string): Session | nu
   ).get(projectId) as unknown as Session) ?? null;
 }
 
+export function updateSessionContainerName(db: DatabaseSync, sessionId: number, containerName: string): void {
+  db.prepare('UPDATE sessions SET container_name = ? WHERE id = ?').run(containerName, sessionId);
+}
+
 export function totalHours(db: DatabaseSync, projectId: string): number {
   const row = db.prepare(
     'SELECT SUM(minutes) as total FROM sessions WHERE project_id = ? AND ended_at IS NOT NULL'

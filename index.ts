@@ -17,22 +17,30 @@ import {
   resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore,
   tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskCpm,
   addDependency, dependenciesByProject,
-  startSession, endSession, activeSession,
+  startSession, endSession, activeSession, updateSessionContainerName,
   insertRoi, roiSummary, totalHours,
   insertTestRun, logAudit, recentAudit, projectStatus,
   insertAdr, listAdrs,
   updateTaskType,
   updateTaskSpec,
+  updateProjectEnv,
+  updateProjectEnvFromFlags,
+  getActiveProjectId,
+  setActiveProjectId,
 } from './lib/db.ts';
-import type { Project, ProjectType, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
+import type { Project, ProjectType, RunEnv, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
 
 import { computeCpm, asciiDag, dotGraph } from './lib/cpm.ts';
 import type { CpmNode, CpmEdge } from './lib/cpm.ts';
 
 import { reportTasks, reportStatus, reportOverview } from './lib/reports.ts';
+import { formatProjectList } from './lib/cli-format.ts';
+import { resolveActiveProject } from './lib/project-resolution.ts';
 import { ask }    from './lib/ask.ts';
 import { exportCsv, syncToSheets } from './lib/sheets.ts';
-import { startServer } from './lib/server.ts';
+import { startServer, updateProjectStatusHandler } from './lib/server.ts';
+import { readCruxConfig, writeCruxConfig } from './lib/config.ts';
+import { agentContext } from './lib/codebase.ts';
 import { syncTasks } from './lib/gh.ts';
 import { runAgent } from './lib/agent.ts';
 import { runWorkflow } from './lib/workflow.ts';
@@ -83,6 +91,8 @@ async function runCli(args: string[]): Promise<void> {
     case 'context':        return cmdContext();
     case 'agent':          return cmdAgent(rest);
     case 'ui':             return cmdUi(rest);
+    case 'config':         return cmdConfig(rest);
+    case 'switch':         return cmdSwitch(rest);
     default:
       console.error(`Unknown command: ${cmd}\nRun crux --help for usage.`);
       process.exit(1);
@@ -121,6 +131,8 @@ BOOTSTRAP
   init [--from tasks.md]         Link repo to a project, seed tasks
   project add <name> [--type T]  Add project (types: code_repo article research freelance learning personal)
   project link                   Link current repo to existing project
+  project status <status>        Set active|stalled|paused|done|dropped on current project
+  switch [name-or-id] [--list]   Switch active project, or list all projects
 
 STATUS
   status                         Current project: tasks, blockers, next up
@@ -433,6 +445,40 @@ function cmdDep(args: string[]): void {
   console.log(`✓ ${args[1]} → ${args[2]}`);
 }
 
+// ── Container lifecycle helpers ───────────────────────────────────────────────
+
+function containerImageForProject(proj: Project, projectRoot: string): string {
+  const containerfile = join(projectRoot, '.crux', 'Containerfile');
+  if (existsSync(containerfile)) {
+    const tag = `crux-${proj.id.slice(0, 8)}:dev`;
+    const r = spawnSync('container', ['build', '-t', tag, '-f', containerfile, projectRoot], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`Container build failed:\n${r.stderr}`);
+    return tag;
+  }
+  if (proj.container_image) return proj.container_image;
+  throw new Error(
+    `run_env=container but no .crux/Containerfile found and no container_image set.\n` +
+    `Create .crux/Containerfile or run: crux project env --container-image <image>`
+  );
+}
+
+function containerStart(proj: Project, sessionId: number, projectRoot: string): string {
+  const image = containerImageForProject(proj, projectRoot);
+  const name  = `crux-session-${sessionId}`;
+  const r = spawnSync('container', [
+    'run', '-d', '--name', name,
+    '-v', `${projectRoot}:/app`, '-w', '/app',
+    image, 'sleep', 'infinity',
+  ], { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`Container start failed:\n${r.stderr}`);
+  return name;
+}
+
+function containerStop(containerName: string): void {
+  spawnSync('container', ['stop', containerName], { encoding: 'utf8' });
+  spawnSync('container', ['rm',   containerName], { encoding: 'utf8' });
+}
+
 // ── session ───────────────────────────────────────────────────────────────────
 
 function cmdSession(args: string[]): void {
@@ -442,8 +488,21 @@ function cmdSession(args: string[]): void {
 
   if (sub === 'start') {
     const s = startSession(db, proj.id);
+    if (proj.run_env === 'container') {
+      try {
+        const root = findRepoRoot() ?? process.cwd();
+        const name = containerStart(proj, s.id, root);
+        updateSessionContainerName(db, s.id, name);
+        console.log(`✓ Session started (id ${s.id}) — container: ${name}`);
+      } catch (e) {
+        endSession(db, s.id);
+        console.error(`Container start failed: ${(e as Error).message}`);
+        process.exit(1);
+      }
+    } else {
+      console.log(`✓ Session started (id ${s.id}) at ${s.started_at}`);
+    }
     logAudit(db, { project_id: proj.id, event: 'session.start', actor: 'human' });
-    console.log(`✓ Session started (id ${s.id}) at ${s.started_at}`);
     return;
   }
 
@@ -451,6 +510,10 @@ function cmdSession(args: string[]): void {
     const note = flag(args, '--note') ?? undefined;
     const sess = activeSession(db, proj.id);
     if (!sess) { console.error('No active session.'); process.exit(1); }
+    if (sess.container_name) {
+      containerStop(sess.container_name);
+      console.log(`✓ Container stopped: ${sess.container_name}`);
+    }
     const ended = endSession(db, sess.id, note);
     logAudit(db, { project_id: proj.id, event: 'session.end', detail: `${ended.minutes?.toFixed(0)}min`, actor: 'human' });
     console.log(`✓ Session ended — ${ended.minutes?.toFixed(1)} minutes`);
@@ -687,11 +750,61 @@ async function cmdProject(args: string[]): Promise<void> {
 
   if (sub === 'list') {
     const projects = allProjects(db);
-    for (const p of projects) console.log(`${p.id.slice(0,8)}  ${p.name.padEnd(30)} ${p.type.padEnd(12)} ${p.status}`);
+    for (const p of projects) console.log(`${p.id.slice(0,8)}  ${p.name.padEnd(30)} ${p.type.padEnd(12)} ${p.status}  ${p.run_env}`);
     return;
   }
 
-  console.error('Usage: crux project add|link|list');
+  if (sub === 'status') {
+    const proj   = getProject();
+    const status = args[1];
+    if (!status) { console.error('Usage: crux project status <active|stalled|paused|done|dropped>'); process.exit(1); }
+    const result = updateProjectStatusHandler(db, proj.id, status);
+    if (result.status !== 200) { console.error((result.body as { error: string }).error); process.exit(1); }
+    console.log(`✓ ${proj.name} → ${status}`);
+    return;
+  }
+
+  if (sub === 'env') {
+    const proj = getProject();
+    updateProjectEnvFromFlags(db, proj.id, {
+      runEnv:        flag(args, '--run-env') ?? undefined,
+      verifyCmd:     flag(args, '--verify-cmd') ?? undefined,
+      testCmd:       flag(args, '--test-cmd') ?? undefined,
+      containerImage: flag(args, '--container-image') ?? undefined,
+    });
+    const updated = projectById(db, proj.id)!;
+    console.log(`✓ Updated env for ${updated.name}`);
+    console.log(`  run_env:         ${updated.run_env}`);
+    console.log(`  verify_cmd:      ${updated.verify_cmd ?? '(none)'}`);
+    console.log(`  test_cmd:        ${updated.test_cmd ?? '(none)'}`);
+    console.log(`  container_image: ${updated.container_image ?? '(none)'}`);
+    return;
+  }
+
+  console.error('Usage: crux project add|link|list|status|env');
+}
+
+// ── switch ────────────────────────────────────────────────────────────────────
+
+function cmdSwitch(args: string[]): void {
+  const db    = openDb();
+  const query = args[0];
+  if (!query || query === '--list') {
+    const all = allProjects(db);
+    console.log(formatProjectList(all, getActiveProjectId(db)));
+    return;
+  }
+  const all   = allProjects(db);
+  const match =
+    all.find(p => p.id === query) ??
+    all.find(p => String(p.project_number) === query) ??
+    all.find(p => p.name.toLowerCase().includes(query.toLowerCase()));
+  if (!match) {
+    console.error(`No project matching "${query}"\nAvailable:\n${formatProjectList(all, getActiveProjectId(db))}`);
+    process.exit(1);
+  }
+  setActiveProjectId(db, match.id);
+  console.log(`✓ Active project → #${match.project_number} ${match.name} (${match.id.slice(0,8)})`);
 }
 
 // ── ready ─────────────────────────────────────────────────────────────────────
@@ -833,7 +946,19 @@ function humanQueue(db: ReturnType<typeof openDb>, projId: string) {
     if (t.executor !== 'human') return false;
     const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
     return preds.every(id => doneIds.has(id));
-  }).map(t => ({ slug: t.slug, title: t.title, phase: t.phase, acceptance_criteria: t.acceptance_criteria }));
+  }).map(t => {
+    // Count tasks directly blocked because this human task is not done
+    const blocksCount = deps.filter(d => d.predecessor_id === t.id).length;
+    return {
+      slug:                t.slug,
+      title:               t.title,
+      phase:               t.phase,
+      acceptance_criteria: t.acceptance_criteria,
+      blocks_downstream:   blocksCount,
+      // Future: notify assigned actor when actors table exists
+      waiting_on:          'human',
+    };
+  });
 }
 
 function stalledTasks(db: ReturnType<typeof openDb>, projId: string) {
@@ -938,7 +1063,7 @@ async function cmdAgent(args: string[]): Promise<void> {
 // ── ui ────────────────────────────────────────────────────────────────────────
 
 async function cmdUi(args: string[]): Promise<void> {
-  const port   = parseInt(flag(args, '--port') ?? '8765');
+  const port   = parseInt(flag(args, '--port') ?? String(readCruxConfig().ui_port));
   const noOpen = hasFlag(args, '--no-open');
   startServer(port);
   if (!noOpen) {
@@ -948,6 +1073,26 @@ async function cmdUi(args: string[]): Promise<void> {
   }
   // Keep alive
   await new Promise(() => {});
+}
+
+// ── config ────────────────────────────────────────────────────────────────────
+
+function cmdConfig(args: string[]): void {
+  const [sub, key, value] = args;
+  if (sub === 'get' && key) {
+    const cfg = readCruxConfig();
+    const val = (cfg as unknown as Record<string, unknown>)[key];
+    if (val === undefined) { console.error(`Unknown config key: ${key}`); process.exit(1); }
+    console.log(val);
+  } else if (sub === 'set' && key && value !== undefined) {
+    const VALID_KEYS: (keyof ReturnType<typeof readCruxConfig>)[] = ['ui_port', 'llm_endpoint'];
+    if (!VALID_KEYS.includes(key as never)) { console.error(`Unknown config key: ${key}. Valid keys: ${VALID_KEYS.join(', ')}`); process.exit(1); }
+    const patch: Record<string, unknown> = { [key]: key === 'ui_port' ? parseInt(value) : value };
+    const updated = writeCruxConfig(patch as Parameters<typeof writeCruxConfig>[0]);
+    console.log(JSON.stringify(updated, null, 2));
+  } else {
+    console.log(JSON.stringify(readCruxConfig(), null, 2));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -965,9 +1110,11 @@ async function runMcpServer(): Promise<void> {
   // ── Helper: resolve project inside tool calls ─────────────────────────────
 
   function requireProject(): Project {
-    const root = findRepoRoot();
-    const proj = resolveProject(db, root);
-    if (!proj) throw new Error('No crux project linked here. Call crux_init first.');
+    // CWD-based .crux/project.json takes precedence — see lib/project-resolution.ts.
+    // Global active_project_id (crux_switch) is only a fallback for sessions
+    // with no directory link; it must not override another session's own link.
+    const proj = resolveActiveProject(db, findRepoRoot());
+    if (!proj) throw new Error('No active project. Call crux_switch <name> or crux_init first.');
     return proj;
   }
 
@@ -982,17 +1129,28 @@ async function runMcpServer(): Promise<void> {
   // ── Tools ─────────────────────────────────────────────────────────────────
 
   server.tool('crux_init', 'Bootstrap DB for current repo; optionally install SKILL.md',
-    { name: z.string(), type: z.enum(['code_repo','article','research','freelance','learning','personal']).default('code_repo'), install_skill: z.boolean().default(false) },
-    async ({ name, type, install_skill }) => {
+    {
+      name:            z.string(),
+      type:            z.enum(['code_repo','article','research','freelance','learning','personal']).default('code_repo'),
+      install_skill:   z.boolean().default(false),
+      run_env:         z.enum(['shell','container']).default('shell'),
+      verify_cmd:      z.string().optional(),
+      test_cmd:        z.string().optional(),
+      container_image: z.string().optional(),
+    },
+    async ({ name, type, install_skill, run_env, verify_cmd, test_cmd, container_image }) => {
       try {
         const root = findRepoRoot() ?? process.cwd();
         const existing = resolveProject(db, root);
         if (existing) return ok({ project: existing, message: 'Already initialised' });
         const proj = insertProject(db, { name, type });
+        if (run_env !== 'shell' || verify_cmd || test_cmd || container_image) {
+          updateProjectEnv(db, proj.id, { run_env, verify_cmd, test_cmd, container_image });
+        }
         writeProjectPointer(root, proj.id);
-        logAudit(db, { project_id: proj.id, event: 'project.init', detail: `type=${type},mcp=true`, actor: 'claude' });
+        logAudit(db, { project_id: proj.id, event: 'project.init', detail: `type=${type},run_env=${run_env}`, actor: 'claude' });
         if (install_skill) installSkill(root);
-        return ok({ project: proj, skill_installed: install_skill });
+        return ok({ project: { ...proj, run_env, verify_cmd, test_cmd }, skill_installed: install_skill });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -1016,7 +1174,7 @@ async function runMcpServer(): Promise<void> {
           const tasks = tasksByProject(db, p.id);
           const roi   = roiSummary(db, p.id);
           const hours = totalHours(db, p.id);
-          return { ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours };
+          return { number: p.project_number, ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours };
         });
         const active = projects.filter(p => p.status === 'active').length;
         return ok({ projects, spread_warning: active > 2 ? `${active} active projects — peak focus is 2` : null });
@@ -1249,24 +1407,32 @@ The agent reads these fields to write correct tests grounded in the real codebas
     }
   );
 
-  server.tool('crux_session_start', 'Start a time-tracking session for the current project', {},
+  server.tool('crux_session_start', 'Start a time-tracking session; starts a container if run_env=container', {},
     () => {
       try {
         const proj = requireProject();
-        const s = startSession(db, proj.id);
+        const s    = startSession(db, proj.id);
+        if (proj.run_env === 'container') {
+          const root = findRepoRoot() ?? process.cwd();
+          const name = containerStart(proj, s.id, root);
+          updateSessionContainerName(db, s.id, name);
+          logAudit(db, { project_id: proj.id, event: 'session.start', detail: `container=${name}`, actor: 'claude' });
+          return ok({ ...s, container_name: name });
+        }
         logAudit(db, { project_id: proj.id, event: 'session.start', actor: 'claude' });
         return ok(s);
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
 
-  server.tool('crux_session_end', 'End session and log minutes elapsed',
+  server.tool('crux_session_end', 'End session, stop container if running, log minutes elapsed',
     { note: z.string().optional() },
     ({ note }) => {
       try {
         const proj = requireProject();
         const sess = activeSession(db, proj.id);
         if (!sess) return err('No active session.');
+        if (sess.container_name) containerStop(sess.container_name);
         const ended = endSession(db, sess.id, note);
         logAudit(db, { project_id: proj.id, event: 'session.end', detail: `${ended.minutes?.toFixed(0)}min`, actor: 'claude' });
         return ok(ended);
@@ -1343,11 +1509,12 @@ The agent reads these fields to write correct tests grounded in the real codebas
 
   // ── Project context (agent orientation) ───────────────────────────────────
   server.tool('crux_project_context',
-    'Full project snapshot for agent orientation: metadata, open tasks with deps, ADRs, CPM summary, recent audit. One call gives a coding agent everything needed to pick up work.',
+    'Full project snapshot for agent orientation: metadata, open tasks with deps, ADRs, CPM summary, recent audit, and live codebase API signatures. One call gives any LLM everything needed to spec or implement work.',
     {},
     () => {
       try {
-        const proj = requireProject();
+        const proj     = requireProject();
+        const projRoot = findRepoRoot() ?? process.cwd();
         const allTasks = tasksByProject(db, proj.id);
         const deps     = dependenciesByProject(db, proj.id);
         const adrs     = listAdrs(db, proj.id);
@@ -1422,6 +1589,36 @@ The agent reads these fields to write correct tests grounded in the real codebas
             actor:      e.actor,
             created_at: e.created_at,
           })),
+          agent_context: agentContext(projRoot, proj.type),
+        });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  // ── Project switch ────────────────────────────────────────────────────────
+  server.tool('crux_switch',
+    'Switch the active project for all MCP tools. Pass a project name (partial match) or full project ID. All subsequent tool calls operate on this project until switched again.',
+    { project: z.string().describe('Project name (partial match) or UUID') },
+    ({ project }) => {
+      try {
+        const all = allProjects(db);
+        const match = all.find(p =>
+          p.id === project ||
+          String(p.project_number) === project ||
+          p.name.toLowerCase().includes(project.toLowerCase())
+        );
+        if (!match) {
+          const names = all.map(p => `${p.name} (${p.id.slice(0,8)})`).join(', ');
+          return err(`No project matching "${project}". Available: ${names}`);
+        }
+        setActiveProjectId(db, match.id);
+        const projRoot = findRepoRoot() ?? process.cwd();
+        return ok({
+          switched_to:   match.name,
+          id:            match.id,
+          type:          match.type,
+          run_env:       match.run_env,
+          agent_context: agentContext(projRoot, match.type),
         });
       } catch (e: unknown) { return err((e as Error).message); }
     }
@@ -1457,8 +1654,8 @@ The agent reads these fields to write correct tests grounded in the real codebas
     }
   );
 
-  // ── UI server (background HTTP on port 8765) ───────────────────────────────
-  startServer(8765);
+  // ── UI server (background HTTP, port from ~/.crux/crux.json) ─────────────
+  startServer();
 
   // ── Connect ────────────────────────────────────────────────────────────────
   const transport = new StdioServerTransport();
@@ -1495,5 +1692,5 @@ crux_init, crux_status, crux_overview, crux_cpm, crux_task_add, crux_task_update
 crux_dep_add, crux_sync, crux_report, crux_ready, crux_graph, crux_test_run,
 crux_milestone_check, crux_session_start, crux_session_end, crux_roi_record,
 crux_roi_report, crux_spread_check, crux_project_add, crux_project_link, crux_ask,
-crux_adr_add, crux_adr_list, crux_project_context
+crux_adr_add, crux_adr_list, crux_project_context, crux_switch
 `;
