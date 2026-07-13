@@ -59,4 +59,25 @@ describe('projectStatus next_unblocked', () => {
     const status = projectStatus(db, pid);
     assert.deepEqual(status.next_unblocked.map(t => t.slug), ['high', 'mid', 'low']);
   });
+
+  test('falls back to WSJF when priority is equal (the common real-world case: priority unset on everything)', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    seedTask(db, pid, 'high-wsjf');
+    seedTask(db, pid, 'low-wsjf');
+    db.prepare("UPDATE tasks SET value_score = 90, duration_days = 1 WHERE project_id = ? AND slug = 'high-wsjf'").run(pid);
+    db.prepare("UPDATE tasks SET value_score = 60, duration_days = 3 WHERE project_id = ? AND slug = 'low-wsjf'").run(pid);
+    const status = projectStatus(db, pid);
+    assert.deepEqual(status.next_unblocked.map(t => t.slug), ['high-wsjf', 'low-wsjf']);
+    assert.equal(status.next_unblocked[0].wsjf, 90);
+    assert.equal(status.next_unblocked[1].wsjf, 20);
+  });
+
+  test('wsjf is 0 when value_score or duration_days is unset, not NaN/Infinity', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    seedTask(db, pid, 'unscored');
+    const status = projectStatus(db, pid);
+    assert.equal(status.next_unblocked[0].wsjf, 0);
+  });
 });
