@@ -26,6 +26,15 @@
     .badge-dropped   { background: #2a2a2a; color: #888; }
     .status-select { font: inherit; font-size: 0.75rem; background: #1c1c1c; color: #ccc;
                       border: 1px solid #333; border-radius: 4px; padding: 0.1em 0.3em; cursor: pointer; }
+    .task-row { cursor: pointer; }
+    .task-row:hover td { background: #161616; }
+    .disclosure { display: inline-block; width: 0.9em; color: #666; }
+    .detail-row td { background: #141414; padding: 0.6rem 0.6rem 0.9rem 2.1rem; }
+    .deps { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.78rem; }
+    .dep-label { color: #666; margin-right: 0.5rem; }
+    .dep-empty { color: #444; }
+    .depchip { display: inline-block; background: #1c1c1c; border: 1px solid #333; border-radius: 4px;
+               padding: 0.1em 0.5em; font-family: monospace; font-size: 0.75rem; color: #ccc; margin-right: 0.35rem; }
     .critical-path { padding: 0.75rem 1rem; background: #1a1a1a; border-radius: 6px; font-size: 0.82rem; color: #ccc; margin-bottom: 1rem; }
     .critical-path .slug { color: #f87171; font-weight: 600; }
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
@@ -53,6 +62,13 @@
       } catch (e) { alert(`Failed to update status: ${e.message}`); render(); }
     }
 
+    function toggleDetail(taskId) {
+      const row  = document.getElementById(`detail-${taskId}`);
+      const disc = document.getElementById(`disc-${taskId}`);
+      row.hidden = !row.hidden;
+      disc.textContent = row.hidden ? '▸' : '▾';
+    }
+
     async function render() {
       const content = document.getElementById('content');
       if (!id) { content.innerHTML = '<p>No project id in URL.</p>'; return; }
@@ -68,7 +84,18 @@
         ]);
       } catch (e) { content.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
 
-      const { project, tasks, status, roi, hours } = data;
+      const { project, tasks, status, roi, hours, deps } = data;
+
+      const slugById = new Map(tasks.map(t => [t.id, t.slug]));
+      const predMap = {}, succMap = {};
+      for (const t of tasks) { predMap[t.id] = []; succMap[t.id] = []; }
+      for (const d of deps) {
+        if (succMap[d.predecessor_id]) succMap[d.predecessor_id].push(d.successor_id);
+        if (predMap[d.successor_id])   predMap[d.successor_id].push(d.predecessor_id);
+      }
+      const depChips = (ids) => ids.length
+        ? ids.map(tid => `<span class="depchip">${slugById.get(tid) ?? tid}</span>`).join('')
+        : '<span class="dep-empty">none</span>';
       document.title = `crux — ${project.name}`;
 
       const roiScore = hours > 0 ? (roi.revenue / hours).toFixed(0) : '—';
@@ -109,17 +136,25 @@
             <thead><tr><th>Slug</th><th>Title</th><th>Status</th><th>Duration</th><th>Float</th><th>GH</th></tr></thead>
             <tbody>
               ${ptasks.map(t => `
-                <tr class="${criticalIds.has(t.id) ? 'critical' : ''}">
-                  <td><code>${t.slug}</code></td>
+                <tr class="task-row ${criticalIds.has(t.id) ? 'critical' : ''}" onclick="toggleDetail(${t.id})">
+                  <td><span class="disclosure" id="disc-${t.id}">▸</span><code>${t.slug}</code></td>
                   <td>${t.title}</td>
-                  <td>
+                  <td onclick="event.stopPropagation()">
                     <select class="status-select" onchange="changeTaskStatus('${t.slug}', this.value)">
                       ${TASK_STATUSES.map(s => `<option value="${s}" ${s === t.status ? 'selected' : ''}>${s}</option>`).join('')}
                     </select>
                   </td>
                   <td>${t.duration_days ?? '—'}</td>
                   <td>${t.float_days !== null ? t.float_days.toFixed(1) : '—'}</td>
-                  <td>${t.gh_issue_number ? `<a href="https://github.com/${project.gh_repo}/issues/${t.gh_issue_number}" target="_blank">#${t.gh_issue_number}</a>` : '—'}</td>
+                  <td onclick="event.stopPropagation()">${t.gh_issue_number ? `<a href="https://github.com/${project.gh_repo}/issues/${t.gh_issue_number}" target="_blank">#${t.gh_issue_number}</a>` : '—'}</td>
+                </tr>
+                <tr class="detail-row" id="detail-${t.id}" hidden>
+                  <td colspan="6">
+                    <div class="deps">
+                      <div><span class="dep-label">Predecessors:</span>${depChips(predMap[t.id])}</div>
+                      <div><span class="dep-label">Successors:</span>${depChips(succMap[t.id])}</div>
+                    </div>
+                  </td>
                 </tr>`).join('')}
             </tbody>
           </table>`).join('')}

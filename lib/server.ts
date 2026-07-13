@@ -76,7 +76,8 @@ function apiProject(db: DatabaseSync, id: string, res: http.ServerResponse): voi
   const status = projectStatus(db, id);
   const roi    = roiSummary(db, id);
   const hours  = totalHours(db, id);
-  json(res, { project, tasks, status, roi, hours });
+  const deps   = dependenciesByProject(db, id);
+  json(res, { project, tasks, status, roi, hours, deps });
 }
 
 function apiCpm(db: DatabaseSync, id: string, res: http.ServerResponse): void {
