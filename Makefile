@@ -39,7 +39,7 @@ RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 	all help bootstrap image ensure-deps \
 	dev build preview \
 	test test-ci test-agent typecheck typecheck-errors lint format validate \
-	shell install ci \
+	shell install update ci \
 	mcpb-validate mcpb-pack \
 	bundle sea-linux sea-macos install \
 	stop clean clean-volumes
@@ -81,6 +81,13 @@ ensure-deps: ## Install dependencies if missing
 deps-update: ## Update package-lock.json inside container (run after adding new deps)
 	@echo "📦 Updating dependencies..."
 	$(RUN_CI) npm install
+
+update: ## Pull latest main, rebuild macOS SEA, reinstall to ~/bin (then reload VSCode window)
+	@git symbolic-ref --short HEAD 2>/dev/null | grep -qx main || { echo "Not on main — switch to main first"; exit 1; }
+	@git diff --quiet && git diff --cached --quiet || { echo "Uncommitted changes present — commit or stash first"; exit 1; }
+	git pull --ff-only origin main
+	$(MAKE) sea-macos
+	@echo "Updated to $$(git rev-parse --short HEAD). In VSCode: Cmd+Shift+P → 'Developer: Reload Window' to pick up the new binary."
 
 install: start test sea-macos ## Run tests, build macOS SEA, install to ~/bin, configure PATH + VSCode MCP
 	@# PATH

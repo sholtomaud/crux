@@ -14,8 +14,8 @@ import { spawnSync } from 'node:child_process';
 
 import {
   openDb, closeDb, findRepoRoot, readProjectPointer, writeProjectPointer,
-  resolveProject, insertProject, projectById, allProjects, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays, updateTaskPriority,
-  tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskCpm,
+  resolveProject, insertProject, projectById, allProjects, resolveProjectByQuery, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays, updateTaskPriority,
+  tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskProject, updateTaskCpm,
   addDependency, dependenciesByProject,
   startSession, endSession, activeSession, updateSessionContainerName,
   insertRoi, roiSummary, totalHours,
@@ -148,6 +148,7 @@ TASKS
   task done <slug> [--note ""]   Mark done
   task start <slug>              Mark in-progress
   task block <slug> [--note ""]  Mark blocked
+  task move <slug> <project>     Reassign task to another project (id|number|name)
   dep add <pred> <succ>          Add predecessor→successor dependency
 
 SCHEDULE
@@ -419,6 +420,25 @@ function cmdTask(args: string[]): void {
     updateTaskType(db, task.id, newType);
     logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.update', detail: `type → ${newType}`, actor: 'human' });
     console.log(`✓ ${slug} type → ${newType}`);
+    return;
+  }
+
+  // Handle `crux task move <slug> <project-id|number|name>`
+  if (sub === 'move') {
+    const projectArg = args[2];
+    if (!projectArg) { console.error('Usage: crux task move <slug> <project-id|number|name>'); process.exit(1); }
+    const target = resolveProjectByQuery(db, projectArg);
+    if (!target) {
+      console.error(`No project matching "${projectArg}"\nAvailable:\n${formatProjectList(allProjects(db), getActiveProjectId(db))}`);
+      process.exit(1);
+    }
+    if (target.id === proj.id) { console.error(`${slug} is already in ${target.name}`); process.exit(1); }
+    if (taskBySlug(db, target.id, slug)) {
+      console.error(`Task slug "${slug}" already exists in ${target.name} — rename before moving`); process.exit(1);
+    }
+    updateTaskProject(db, task.id, target.id);
+    logAudit(db, { project_id: target.id, task_id: task.id, event: 'task.move', detail: `${proj.name} → ${target.name}`, actor: 'human' });
+    console.log(`✓ ${slug} moved: ${proj.name} → ${target.name}`);
     return;
   }
 
@@ -797,10 +817,7 @@ function cmdSwitch(args: string[]): void {
     return;
   }
   const all   = allProjects(db);
-  const match =
-    all.find(p => p.id === query) ??
-    all.find(p => String(p.project_number) === query) ??
-    all.find(p => p.name.toLowerCase().includes(query.toLowerCase()));
+  const match = resolveProjectByQuery(db, query);
   if (!match) {
     console.error(`No project matching "${query}"\nAvailable:\n${formatProjectList(all, getActiveProjectId(db))}`);
     process.exit(1);

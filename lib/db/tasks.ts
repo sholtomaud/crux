@@ -96,6 +96,10 @@ export function updateTaskType(db: DatabaseSync, taskId: number, taskType: TaskT
   db.prepare('UPDATE tasks SET task_type = ? WHERE id = ?').run(taskType, taskId);
 }
 
+export function updateTaskProject(db: DatabaseSync, taskId: number, projectId: string): void {
+  db.prepare('UPDATE tasks SET project_id = ? WHERE id = ?').run(projectId, taskId);
+}
+
 export function updateTaskSpec(
   db: DatabaseSync,
   taskId: number,

@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { updateTaskActualDays } from '../../lib/db/tasks.ts';
+import { updateTaskActualDays, updateTaskProject } from '../../lib/db/tasks.ts';
+import { resolveProjectByQuery } from '../../lib/db/projects.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -94,6 +95,25 @@ describe('projects', () => {
     assert.throws(() => {
       db.prepare("INSERT INTO projects (id, name, type, status) VALUES (?, ?, ?, ?)").run(randomUUID(), 'x', 'article', 'bad');
     });
+    db.close();
+  });
+
+  test('resolveProjectByQuery matches by id, number, and name substring', () => {
+    const db = makeDb();
+    const id = seedProject(db, 'my-blog', 'article');
+    const byId = resolveProjectByQuery(db, id);
+    assert.equal(byId?.id, id);
+    const byNumber = resolveProjectByQuery(db, String(byId!.project_number));
+    assert.equal(byNumber?.id, id);
+    const byName = resolveProjectByQuery(db, 'BLOG');
+    assert.equal(byName?.id, id);
+    db.close();
+  });
+
+  test('resolveProjectByQuery returns null for no match', () => {
+    const db = makeDb();
+    seedProject(db, 'my-blog', 'article');
+    assert.equal(resolveProjectByQuery(db, 'nonexistent'), null);
     db.close();
   });
 });
@@ -185,6 +205,29 @@ describe('tasks', () => {
     assert.throws(() => {
       db.prepare("INSERT INTO tasks (project_id, slug, title, estimated_by) VALUES (?, ?, ?, ?)").run(pid, 'bad', 'Bad', 'robot');
     });
+    db.close();
+  });
+
+  test('updateTaskProject reassigns task to another project', () => {
+    const db = makeDb();
+    const p1 = seedProject(db, 'proj-a');
+    const p2 = seedProject(db, 'proj-b');
+    const tid = seedTask(db, p1, 'movable');
+    updateTaskProject(db, tid, p2);
+    const row = db.prepare('SELECT project_id FROM tasks WHERE id = ?').get(tid) as { project_id: string };
+    assert.equal(row.project_id, p2);
+    const oldRow = db.prepare('SELECT * FROM tasks WHERE project_id = ? AND slug = ?').get(p1, 'movable');
+    assert.equal(oldRow, undefined);
+    db.close();
+  });
+
+  test('updateTaskProject throws when slug collides in target project', () => {
+    const db = makeDb();
+    const p1 = seedProject(db, 'proj-a');
+    const p2 = seedProject(db, 'proj-b');
+    const tid = seedTask(db, p1, 'dup');
+    seedTask(db, p2, 'dup');
+    assert.throws(() => updateTaskProject(db, tid, p2));
     db.close();
   });
 });

@@ -16,6 +16,17 @@ export function allProjects(db: DatabaseSync): Project[] {
   return db.prepare('SELECT * FROM projects ORDER BY project_number ASC').all() as unknown as Project[];
 }
 
+/** Resolves a project by exact id, exact project_number, or case-insensitive substring of name. */
+export function resolveProjectByQuery(db: DatabaseSync, query: string): Project | null {
+  const all = allProjects(db);
+  return (
+    all.find(p => p.id === query) ??
+    all.find(p => String(p.project_number) === query) ??
+    all.find(p => p.name.toLowerCase().includes(query.toLowerCase())) ??
+    null
+  );
+}
+
 export function insertProject(
   db: DatabaseSync,
   opts: { name: string; type: ProjectType; gh_repo?: string; hourly_rate?: number }
