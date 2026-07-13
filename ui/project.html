@@ -36,7 +36,7 @@
   </style>
 </head>
 <body>
-  <p><a href="/">← all projects</a></p>
+  <p><a href="/">← all projects</a> <span id="nav-graph-wrap" hidden>· <a id="nav-graph" href="#">dependency graph →</a></span></p>
   <div id="content"><p class="loading">Loading…</p></div>
 
   <script src="/app.js"></script>
@@ -56,6 +56,9 @@
     async function render() {
       const content = document.getElementById('content');
       if (!id) { content.innerHTML = '<p>No project id in URL.</p>'; return; }
+
+      document.getElementById('nav-graph').href = `/graph?id=${id}`;
+      document.getElementById('nav-graph-wrap').hidden = false;
 
       let data, cpm;
       try {
