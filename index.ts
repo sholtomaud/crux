@@ -45,7 +45,7 @@ import { readCruxConfig, writeCruxConfig } from './lib/config.ts';
 import { agentContext } from './lib/codebase.ts';
 import { syncTasks } from './lib/gh.ts';
 import { runAgent } from './lib/agent.ts';
-import { runWorkflow } from './lib/workflow.ts';
+import { runWorkflow, gitCommitFiles, gitPushBranch } from './lib/workflow.ts';
 
 // ── Mode detection ─────────────────────────────────────────────────────────────
 // CLI: args present, or stdin is a TTY
@@ -1635,6 +1635,37 @@ The agent reads these fields to write correct tests grounded in the real codebas
     }
   );
 
+  // ── Standalone git tools (interactive work — not the full autonomous workflow) ─
+  server.tool('crux_git_commit',
+    'Commit files with a message in the current repo. For incremental interactive work — does not run the full branch/test/push/PR pipeline (see crux agent for that).',
+    { message: z.string(), files: z.array(z.string()).min(1) },
+    ({ message, files }) => {
+      try {
+        const proj = requireProject();
+        const cwd  = findRepoRoot() ?? process.cwd();
+        const result = gitCommitFiles(cwd, message, files);
+        if (!result.ok) return err(result.out || 'commit failed');
+        logAudit(db, { project_id: proj.id, event: 'git.commit', detail: message, actor: 'claude' });
+        return ok({ message, files });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  server.tool('crux_git_push',
+    'Push the current branch (or a named one) to origin. For incremental interactive work.',
+    { branch: z.string().optional() },
+    ({ branch }) => {
+      try {
+        const proj = requireProject();
+        const cwd  = findRepoRoot() ?? process.cwd();
+        const result = gitPushBranch(cwd, branch);
+        if (!result.ok) return err(result.out || 'push failed');
+        logAudit(db, { project_id: proj.id, event: 'git.push', detail: branch, actor: 'claude' });
+        return ok({ pushed: true, branch: branch ?? '(current)' });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
   // ── ADR tools ─────────────────────────────────────────────────────────────
   server.tool('crux_adr_add', 'Add an Architecture Decision Record to the current project',
     {
@@ -1703,5 +1734,5 @@ crux_init, crux_status, crux_overview, crux_cpm, crux_task_add, crux_task_update
 crux_dep_add, crux_sync, crux_report, crux_ready, crux_graph, crux_test_run,
 crux_milestone_check, crux_session_start, crux_session_end, crux_roi_record,
 crux_roi_report, crux_spread_check, crux_project_add, crux_project_link, crux_ask,
-crux_adr_add, crux_adr_list, crux_project_context, crux_switch
+crux_adr_add, crux_adr_list, crux_project_context, crux_switch, crux_git_commit, crux_git_push
 `;

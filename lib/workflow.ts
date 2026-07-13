@@ -80,6 +80,25 @@ function git(args: string[], cwd: string, log: (s: string) => void): { ok: boole
   return { ok: r.status === 0, out };
 }
 
+// ── Standalone git operations (no StepContext/workflow session required) ─────
+// Used by crux_git_commit/crux_git_push for incremental interactive work,
+// as opposed to stepCommit/stepPush which are steps inside the full
+// autonomous tddWorkflow pipeline.
+
+export function gitCommitFiles(cwd: string, message: string, files: string[]): { ok: boolean; out: string } {
+  if (files.length === 0) return { ok: false, out: 'no files given — nothing to commit' };
+  const noop = () => {};
+  const add = git(['add', ...files], cwd, noop);
+  if (!add.ok) return add;
+  return git(['commit', '-m', message], cwd, noop);
+}
+
+export function gitPushBranch(cwd: string, branch?: string): { ok: boolean; out: string } {
+  const noop = () => {};
+  const args = branch ? ['push', '-u', 'origin', branch] : ['push'];
+  return git(args, cwd, noop);
+}
+
 function run(cmd: string, cwd: string, log: (s: string) => void): { ok: boolean; out: string } {
   const r = spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf8', timeout: 120_000 });
   const out = ((r.stdout ?? '') + (r.stderr ?? '')).trim();
