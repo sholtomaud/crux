@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 import {
   openDb, closeDb, findRepoRoot, readProjectPointer, writeProjectPointer,
-  resolveProject, insertProject, projectById, allProjects, resolveProjectByQuery, updateProjectStatus, updateProjectGhRepo, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays, updateTaskPriority,
+  resolveProject, insertProject, projectById, allProjects, resolveProjectByQuery, updateProjectStatus, updateProjectGhRepo, updateProjectRepoPath, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays, updateTaskPriority,
   tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskProject, updateTaskCpm,
   addDependency, dependenciesByProject,
   startSession, endSession, activeSession, updateSessionContainerName,
@@ -214,6 +214,7 @@ async function cmdInit(args: string[]): Promise<void> {
 
   const project = insertProject(db, { name: name.trim(), type });
   writeProjectPointer(root, project.id);
+  updateProjectRepoPath(db, project.id, root);
 
   logAudit(db, { project_id: project.id, event: 'project.init', detail: `type=${type}`, actor: 'human' });
   console.log(`✓ Project "${project.name}" created (${project.id})`);
@@ -765,6 +766,7 @@ async function cmdProject(args: string[]): Promise<void> {
     const proj = projects[parseInt(ans) - 1];
     if (!proj) { console.error('Invalid selection'); process.exit(1); }
     writeProjectPointer(root, proj.id);
+    updateProjectRepoPath(db, proj.id, root);
     if (ghRepo) updateProjectGhRepo(db, proj.id, ghRepo);
     console.log(`✓ Linked to ${proj.name}${ghRepo ? ` (gh_repo: ${ghRepo})` : ''}`);
     return;
@@ -1156,10 +1158,11 @@ async function runMcpServer(): Promise<void> {
       verify_cmd:      z.string().optional(),
       test_cmd:        z.string().optional(),
       container_image: z.string().optional(),
+      repo_path:       z.string().optional().describe('Absolute path to link, if not the MCP server process cwd'),
     },
-    async ({ name, type, install_skill, run_env, verify_cmd, test_cmd, container_image }) => {
+    async ({ name, type, install_skill, run_env, verify_cmd, test_cmd, container_image, repo_path }) => {
       try {
-        const root = findRepoRoot() ?? process.cwd();
+        const root = repo_path ?? findRepoRoot() ?? process.cwd();
         const existing = resolveProject(db, root);
         if (existing) return ok({ project: existing, message: 'Already initialised' });
         const proj = insertProject(db, { name, type });
@@ -1167,6 +1170,7 @@ async function runMcpServer(): Promise<void> {
           updateProjectEnv(db, proj.id, { run_env, verify_cmd, test_cmd, container_image });
         }
         writeProjectPointer(root, proj.id);
+        updateProjectRepoPath(db, proj.id, root);
         logAudit(db, { project_id: proj.id, event: 'project.init', detail: `type=${type},run_env=${run_env}`, actor: 'claude' });
         if (install_skill) installSkill(root);
         return ok({ project: { ...proj, run_env, verify_cmd, test_cmd }, skill_installed: install_skill });
@@ -1518,6 +1522,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
         const proj = projectById(db, project_id);
         if (!proj) return err(`Project not found: ${project_id}`);
         writeProjectPointer(root, project_id);
+        updateProjectRepoPath(db, project_id, root);
         if (gh_repo) updateProjectGhRepo(db, project_id, gh_repo);
         return ok({ linked: true, project: projectById(db, project_id) });
       } catch (e: unknown) { return err((e as Error).message); }
@@ -1542,7 +1547,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
     () => {
       try {
         const proj     = requireProject();
-        const projRoot = findRepoRoot() ?? process.cwd();
+        const projRoot = proj.repo_path ?? findRepoRoot() ?? process.cwd();
         const allTasks = tasksByProject(db, proj.id);
         const deps     = dependenciesByProject(db, proj.id);
         const adrs     = listAdrs(db, proj.id);
@@ -1640,7 +1645,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
           return err(`No project matching "${project}". Available: ${names}`);
         }
         setActiveProjectId(db, match.id);
-        const projRoot = findRepoRoot() ?? process.cwd();
+        const projRoot = match.repo_path ?? findRepoRoot() ?? process.cwd();
         return ok({
           switched_to:   match.name,
           id:            match.id,
@@ -1659,7 +1664,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
     ({ message, files }) => {
       try {
         const proj = requireProject();
-        const cwd  = findRepoRoot() ?? process.cwd();
+        const cwd  = proj.repo_path ?? findRepoRoot() ?? process.cwd();
         const result = gitCommitFiles(cwd, message, files);
         if (!result.ok) return err(result.out || 'commit failed');
         logAudit(db, { project_id: proj.id, event: 'git.commit', detail: message, actor: 'claude' });
@@ -1674,7 +1679,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
     ({ branch }) => {
       try {
         const proj = requireProject();
-        const cwd  = findRepoRoot() ?? process.cwd();
+        const cwd  = proj.repo_path ?? findRepoRoot() ?? process.cwd();
         const result = gitPushBranch(cwd, branch);
         if (!result.ok) return err(result.out || 'push failed');
         logAudit(db, { project_id: proj.id, event: 'git.push', detail: branch, actor: 'claude' });

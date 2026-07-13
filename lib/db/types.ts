@@ -51,6 +51,7 @@ export interface Project {
   verify_cmd: string | null;
   test_cmd: string | null;
   container_image: string | null;
+  repo_path: string | null;
   created_at: string;
 }
 

@@ -94,6 +94,9 @@ export function applyMigrations(db: DatabaseSync): void {
   if (!projCols.includes('daily_cost')) {
     db.exec('ALTER TABLE projects ADD COLUMN daily_cost REAL;');
   }
+  if (!projCols.includes('repo_path')) {
+    db.exec('ALTER TABLE projects ADD COLUMN repo_path TEXT;');
+  }
 
   // sessions migrations
   if (!sessionCols.includes('container_name')) {

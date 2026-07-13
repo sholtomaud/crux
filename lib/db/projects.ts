@@ -51,6 +51,10 @@ export function updateProjectGhRepo(db: DatabaseSync, id: string, ghRepo: string
   db.prepare('UPDATE projects SET gh_repo = ? WHERE id = ?').run(ghRepo, id);
 }
 
+export function updateProjectRepoPath(db: DatabaseSync, id: string, repoPath: string): void {
+  db.prepare('UPDATE projects SET repo_path = ? WHERE id = ?').run(repoPath, id);
+}
+
 export function updateProjectDailyCost(db: DatabaseSync, id: string, dailyCost: number | null): void {
   db.prepare('UPDATE projects SET daily_cost = ? WHERE id = ?').run(dailyCost, id);
 }

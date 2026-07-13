@@ -12,6 +12,7 @@ function fakeProject(overrides: Partial<Project>): Project {
     id: 'id', project_number: 1, name: 'name', type: 'code_repo', status: 'active',
     gh_repo: null, gh_sync: 0, sheets_id: null, hourly_rate: null, daily_cost: null,
     run_env: 'shell', verify_cmd: null, test_cmd: null, container_image: null,
+    repo_path: null,
     created_at: '2026-01-01',
     ...overrides,
   };

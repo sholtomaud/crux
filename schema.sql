@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS projects (
     verify_cmd       TEXT,               -- command to verify/typecheck (null = skip)
     test_cmd         TEXT,               -- command to run tests (null = skip)
     container_image  TEXT,               -- image name when run_env='container' and no Containerfile
+    repo_path        TEXT,               -- absolute local filesystem path this project is linked to (NULL = unlinked)
     created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

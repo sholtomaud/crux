@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { applyMigrations } from '../../lib/db/open.ts';
-import { insertProject, allProjects, projectById, updateProjectDailyCost, setDefaultDailyCost, resolveDailyCost } from '../../lib/db/projects.ts';
+import { insertProject, allProjects, projectById, updateProjectDailyCost, setDefaultDailyCost, resolveDailyCost, updateProjectRepoPath } from '../../lib/db/projects.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -106,6 +106,54 @@ describe('project_number', () => {
     assert.ok(p1.project_number >= 1, 'p1 should have a project_number');
     assert.ok(p2.project_number >= 1, 'p2 should have a project_number');
     assert.notEqual(p1.project_number, p2.project_number, 'numbers must be unique');
+  });
+});
+
+describe('repo_path', () => {
+  test('null by default, set via updateProjectRepoPath', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'code_repo' });
+    assert.equal(p.repo_path, null);
+    updateProjectRepoPath(db, p.id, '/Users/sholtomaud/Development/crux');
+    const updated = projectById(db, p.id)!;
+    assert.equal(updated.repo_path, '/Users/sholtomaud/Development/crux');
+  });
+
+  test('applyMigrations adds repo_path column to a legacy DB missing it', () => {
+    const db  = new DatabaseSync(':memory:');
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'personal', status TEXT NOT NULL DEFAULT 'active',
+        gh_repo TEXT, gh_sync INTEGER NOT NULL DEFAULT 0, sheets_id TEXT,
+        hourly_rate REAL, run_env TEXT NOT NULL DEFAULT 'shell',
+        verify_cmd TEXT, test_cmd TEXT, container_image TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS global_config (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, slug TEXT NOT NULL,
+        title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', priority INTEGER NOT NULL DEFAULT 0,
+        task_type TEXT NOT NULL DEFAULT 'coding', executor TEXT NOT NULL DEFAULT 'auto',
+        is_critical INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(project_id, slug)
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')), ended_at TEXT, note TEXT,
+        minutes REAL, container_name TEXT
+      );
+    `);
+    const id = randomUUID();
+    db.prepare('INSERT INTO projects (id, name, type) VALUES (?, ?, ?)').run(id, 'Legacy', 'code_repo');
+    applyMigrations(db);
+    updateProjectRepoPath(db, id, '/tmp/legacy-repo');
+    const proj = projectById(db, id)!;
+    assert.equal(proj.repo_path, '/tmp/legacy-repo');
   });
 });
 
