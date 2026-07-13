@@ -1674,16 +1674,30 @@ The agent reads these fields to write correct tests grounded in the real codebas
   );
 
   server.tool('crux_git_push',
-    'Push the current branch (or a named one) to origin. For incremental interactive work.',
-    { branch: z.string().optional() },
-    ({ branch }) => {
+    'Push the current branch (or a named one) to origin. Optionally commit first: pass message + files to commit-then-push in one call (e.g. once all of a task\'s acceptance criteria are met). For incremental interactive work.',
+    {
+      branch:  z.string().optional(),
+      message: z.string().optional().describe('If set (with files), commit before pushing'),
+      files:   z.array(z.string()).optional().describe('Files to commit; required if message is set'),
+    },
+    ({ branch, message, files }) => {
       try {
         const proj = requireProject();
         const cwd  = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+
+        let committed: { message: string; files: string[] } | null = null;
+        if (message) {
+          if (!files || files.length === 0) return err('files is required when message is set');
+          const commitResult = gitCommitFiles(cwd, message, files);
+          if (!commitResult.ok) return err(commitResult.out || 'commit failed');
+          logAudit(db, { project_id: proj.id, event: 'git.commit', detail: message, actor: 'claude' });
+          committed = { message, files };
+        }
+
         const result = gitPushBranch(cwd, branch);
         if (!result.ok) return err(result.out || 'push failed');
         logAudit(db, { project_id: proj.id, event: 'git.push', detail: branch, actor: 'claude' });
-        return ok({ pushed: true, branch: branch ?? '(current)' });
+        return ok({ pushed: true, branch: branch ?? '(current)', committed });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
