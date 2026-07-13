@@ -20,7 +20,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@typescript/native-preview": "^7.0.0-dev",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.1"
   },
   "engines": {
     "node": ">=25.0.0"
