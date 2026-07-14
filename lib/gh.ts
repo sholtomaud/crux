@@ -108,7 +108,7 @@ export interface SyncAction {
  */
 export function syncTasks(
   repo: string,
-  tasks: Array<{ id: number; slug: string; title: string; status: string; gh_issue_number: number | null }>,
+  tasks: Array<{ id: number; slug: string; title: string; status: string; gh_issue_number: number | null; executor: string }>,
   apply: boolean = false,
 ): SyncAction[] {
   const actions: SyncAction[] = [];
@@ -116,6 +116,8 @@ export function syncTasks(
   // Build a title→issue map from existing GH issues to avoid duplicates
   const existingIssues = listIssues(repo, 'crux');
   const issueByTitle = new Map<string, number>(existingIssues.map(i => [i.title, i.number]));
+
+  let julesLabelEnsured = false;
 
   for (const task of tasks) {
     if (task.status === 'dropped') {
@@ -129,7 +131,17 @@ export function syncTasks(
       // Task has no linked issue → create one
       actions.push({ action: 'create', task_slug: task.slug, reason: 'no linked GH issue' });
       if (apply) {
-        const issue = createIssue(repo, task.title, `crux task: \`${task.slug}\``, ['crux']);
+        // executor auto/llm = suitable for autonomous pickup; label it 'jules' so
+        // https://jules.google.com picks it up (repo must be connected there).
+        const labels = ['crux'];
+        if (task.executor === 'auto' || task.executor === 'llm') {
+          if (!julesLabelEnsured) {
+            ensureLabel(repo, 'jules', 'a78bfa', 'Auto-picked-up by Google Jules');
+            julesLabelEnsured = true;
+          }
+          labels.push('jules');
+        }
+        const issue = createIssue(repo, task.title, `crux task: \`${task.slug}\``, labels);
         actions[actions.length - 1].issue_number = issue.number;
       }
     } else {

@@ -665,7 +665,7 @@ async function cmdSync(args: string[]): Promise<void> {
   const apply  = hasFlag(args, '--apply');
   const tasks  = tasksByProject(db, proj.id);
   const actions = syncTasks(proj.gh_repo, tasks.map(t => ({
-    id: t.id, slug: t.slug, title: t.title, status: t.status, gh_issue_number: t.gh_issue_number,
+    id: t.id, slug: t.slug, title: t.title, status: t.status, gh_issue_number: t.gh_issue_number, executor: t.executor,
   })), apply);
 
   if (apply) {
@@ -1347,7 +1347,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
         if (!proj.gh_repo) return err('No gh_repo set for this project.');
         const tasks = tasksByProject(db, proj.id);
         const actions = syncTasks(proj.gh_repo, tasks.map(t => ({
-          id: t.id, slug: t.slug, title: t.title, status: t.status, gh_issue_number: t.gh_issue_number,
+          id: t.id, slug: t.slug, title: t.title, status: t.status, gh_issue_number: t.gh_issue_number, executor: t.executor,
         })), apply);
         // Write gh_issue_number back to DB for any newly created issues
         if (apply) {

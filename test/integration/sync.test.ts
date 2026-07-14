@@ -30,6 +30,7 @@ const REPO = 'sholtomaud/crux-test';
 before(() => {
   ensureLabel(REPO, 'pm-test', 'e4e669', 'Created by crux integration tests');
   ensureLabel(REPO, 'crux',    '0075ca', 'Managed by crux');
+  ensureLabel(REPO, 'jules',   'a78bfa', 'Auto-picked-up by Google Jules');
 });
 
 after(() => {
@@ -101,8 +102,8 @@ describe('listIssues', () => {
 describe('syncTasks', () => {
   test('dry-run: proposes create for tasks without gh_issue_number', () => {
     const tasks = [
-      { id: 1, slug: 'setup', title: 'Setup project', status: 'open', gh_issue_number: null },
-      { id: 2, slug: 'build', title: 'Build feature', status: 'open', gh_issue_number: null },
+      { id: 1, slug: 'setup', title: 'Setup project', status: 'open', gh_issue_number: null, executor: 'human' },
+      { id: 2, slug: 'build', title: 'Build feature', status: 'open', gh_issue_number: null, executor: 'human' },
     ];
     const actions = syncTasks(REPO, tasks, false);
     assert.equal(actions.length, 2);
@@ -112,7 +113,7 @@ describe('syncTasks', () => {
   test('dry-run: proposes close for done tasks with linked issue', () => {
     const issue = createIssue(REPO, '[pm-test] sync close test', 'body', ['pm-test']);
     const tasks = [
-      { id: 1, slug: 'done-task', title: 'Done task', status: 'done', gh_issue_number: issue.number },
+      { id: 1, slug: 'done-task', title: 'Done task', status: 'done', gh_issue_number: issue.number, executor: 'human' },
     ];
     const actions = syncTasks(REPO, tasks, false);
     assert.equal(actions.length, 1);
@@ -121,7 +122,7 @@ describe('syncTasks', () => {
 
   test('dry-run: skips dropped tasks', () => {
     const tasks = [
-      { id: 1, slug: 'dropped-task', title: 'Dropped', status: 'dropped', gh_issue_number: null },
+      { id: 1, slug: 'dropped-task', title: 'Dropped', status: 'dropped', gh_issue_number: null, executor: 'human' },
     ];
     const actions = syncTasks(REPO, tasks, false);
     assert.equal(actions.length, 1);
@@ -130,11 +131,24 @@ describe('syncTasks', () => {
 
   test('apply: creates real issue and returns issue number', () => {
     const tasks = [
-      { id: 99, slug: 'pm-test-apply', title: '[pm-test] syncTasks apply', status: 'open', gh_issue_number: null },
+      { id: 99, slug: 'pm-test-apply', title: '[pm-test] syncTasks apply', status: 'open', gh_issue_number: null, executor: 'human' },
     ];
     const actions = syncTasks(REPO, tasks, true);
     assert.equal(actions[0].action, 'create');
     assert.ok(typeof actions[0].issue_number === 'number', 'should return created issue number');
     assert.ok(actions[0].issue_number! > 0);
+  });
+
+  test('apply: executor=auto gets the jules label, executor=human does not', () => {
+    const tasks = [
+      { id: 100, slug: 'pm-test-auto', title: '[pm-test] syncTasks jules label (auto)', status: 'open', gh_issue_number: null, executor: 'auto' },
+      { id: 101, slug: 'pm-test-human', title: '[pm-test] syncTasks no jules label (human)', status: 'open', gh_issue_number: null, executor: 'human' },
+    ];
+    const actions = syncTasks(REPO, tasks, true);
+    const autoIssue  = getIssue(REPO, actions[0].issue_number!);
+    const humanIssue = getIssue(REPO, actions[1].issue_number!);
+    const labelNames = (issue: GhIssue) => issue.labels.map(l => typeof l === 'string' ? l : (l as unknown as { name: string }).name);
+    assert.ok(labelNames(autoIssue).includes('jules'), 'auto-executor task issue should have the jules label');
+    assert.ok(!labelNames(humanIssue).includes('jules'), 'human-executor task issue should not have the jules label');
   });
 });
