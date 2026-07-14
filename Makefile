@@ -116,7 +116,7 @@ preview: ensure-deps ## Preview production build
 	@echo "👀 Preview build..."
 	$(RUN) npm run preview
 
-test: ensure-deps ## Run test suite
+test: start ensure-deps ## Run test suite
 	@echo "🧪 Running tests..."
 	$(RUN_CI) npm test
 
