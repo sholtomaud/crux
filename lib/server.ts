@@ -15,6 +15,8 @@
  *   GET /api/db/:table → JSON (raw table data)
  *   POST /api/task/:projectId/:slug/status → JSON (update task status)
  *   POST /api/project/:id/status           → JSON (update project status)
+ *   POST /api/project/:id/session/start    → JSON (start a work session)
+ *   POST /api/project/:id/session/end      → JSON (end the active work session)
  */
 
 import http from 'node:http';
@@ -23,6 +25,7 @@ import {
   openDb, allProjects, tasksByProject, dependenciesByProject,
   roiSummary, totalHours, projectStatus,
   taskBySlug, updateTaskStatus, projectById, updateProjectStatus, logAudit,
+  activeSession, startSession, endSession,
   TASK_STATUSES, PROJECT_STATUSES,
 } from './db.ts';
 import type { TaskStatus, ProjectStatus } from './db.ts';
@@ -77,7 +80,8 @@ function apiProject(db: DatabaseSync, id: string, res: http.ServerResponse): voi
   const roi    = roiSummary(db, id);
   const hours  = totalHours(db, id);
   const deps   = dependenciesByProject(db, id);
-  json(res, { project, tasks, status, roi, hours, deps });
+  const session = activeSession(db, id);
+  json(res, { project, tasks, status, roi, hours, deps, session });
 }
 
 function apiCpm(db: DatabaseSync, id: string, res: http.ServerResponse): void {
@@ -123,6 +127,25 @@ export function updateTaskStatusHandler(db: DatabaseSync, projectId: string, slu
   updateTaskStatus(db, projectId, slug, status as TaskStatus);
   logAudit(db, { project_id: projectId, task_id: task.id, event: `task.${status}`, actor: 'human' });
   return { status: 200, body: { slug, status } };
+}
+
+export function sessionStartHandler(db: DatabaseSync, projectId: string): ApiResult {
+  const project = projectById(db, projectId);
+  if (!project) return { status: 404, body: { error: 'project not found' } };
+  if (activeSession(db, projectId)) return { status: 409, body: { error: 'session already active' } };
+  const session = startSession(db, projectId);
+  logAudit(db, { project_id: projectId, event: 'session.start', actor: 'human' });
+  return { status: 200, body: { session } };
+}
+
+export function sessionEndHandler(db: DatabaseSync, projectId: string, note: unknown): ApiResult {
+  const project = projectById(db, projectId);
+  if (!project) return { status: 404, body: { error: 'project not found' } };
+  const active = activeSession(db, projectId);
+  if (!active) return { status: 409, body: { error: 'no active session' } };
+  const session = endSession(db, active.id, typeof note === 'string' ? note : undefined);
+  logAudit(db, { project_id: projectId, event: 'session.end', detail: session.minutes != null ? `${session.minutes}m` : undefined, actor: 'human' });
+  return { status: 200, body: { session } };
 }
 
 export function updateProjectStatusHandler(db: DatabaseSync, id: string, status: unknown): ApiResult {
@@ -171,6 +194,17 @@ export function startServer(port = readCruxConfig().ui_port, host = '127.0.0.1')
       if (projectMatch) {
         const body   = await readJsonBody(req) as { status?: unknown } | undefined;
         const result = updateProjectStatusHandler(db, decodeURIComponent(projectMatch[1]), body?.status);
+        return json(res, result.body, result.status);
+      }
+      const sessionStartMatch = path.match(/^\/api\/project\/([^/]+)\/session\/start$/);
+      if (sessionStartMatch) {
+        const result = sessionStartHandler(db, decodeURIComponent(sessionStartMatch[1]));
+        return json(res, result.body, result.status);
+      }
+      const sessionEndMatch = path.match(/^\/api\/project\/([^/]+)\/session\/end$/);
+      if (sessionEndMatch) {
+        const body   = await readJsonBody(req) as { note?: unknown } | undefined;
+        const result = sessionEndHandler(db, decodeURIComponent(sessionEndMatch[1]), body?.note);
         return json(res, result.body, result.status);
       }
     }

@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { updateTaskStatusHandler, updateProjectStatusHandler } from '../../lib/server.ts';
+import { updateTaskStatusHandler, updateProjectStatusHandler, sessionStartHandler, sessionEndHandler } from '../../lib/server.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -77,6 +77,67 @@ describe('updateTaskStatusHandler', () => {
     const audit = db.prepare('SELECT * FROM audit WHERE project_id = ?').get(p.id) as { actor: string; event: string };
     assert.equal(audit.actor, 'human');
     assert.equal(audit.event, 'task.done');
+    db.close();
+  });
+});
+
+describe('sessionStartHandler / sessionEndHandler', () => {
+  test('start returns 200 with an open session', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    const result = sessionStartHandler(db, p.id);
+    assert.equal(result.status, 200);
+    const row = db.prepare('SELECT * FROM sessions WHERE project_id = ?').get(p.id) as { ended_at: string | null };
+    assert.equal(row.ended_at, null);
+    db.close();
+  });
+
+  test('start twice while a session is active returns 409, does not create a second row', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    sessionStartHandler(db, p.id);
+    const result = sessionStartHandler(db, p.id);
+    assert.equal(result.status, 409);
+    const rows = db.prepare('SELECT * FROM sessions WHERE project_id = ?').all(p.id);
+    assert.equal(rows.length, 1);
+    db.close();
+  });
+
+  test('start on unknown project returns 404', () => {
+    const db = makeDb();
+    const result = sessionStartHandler(db, randomUUID());
+    assert.equal(result.status, 404);
+    db.close();
+  });
+
+  test('end with no active session returns 409', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    const result = sessionEndHandler(db, p.id, undefined);
+    assert.equal(result.status, 409);
+    db.close();
+  });
+
+  test('end closes the active session and records minutes', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    sessionStartHandler(db, p.id);
+    const result = sessionEndHandler(db, p.id, undefined);
+    assert.equal(result.status, 200);
+    const row = db.prepare('SELECT * FROM sessions WHERE project_id = ?').get(p.id) as { ended_at: string | null; minutes: number | null };
+    assert.ok(row.ended_at !== null);
+    assert.ok(row.minutes !== null);
+    db.close();
+  });
+
+  test('start/end write audit rows with actor human', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    sessionStartHandler(db, p.id);
+    sessionEndHandler(db, p.id, undefined);
+    const events = (db.prepare('SELECT event, actor FROM audit WHERE project_id = ? ORDER BY id').all(p.id)) as Array<{ event: string; actor: string }>;
+    assert.deepEqual(events.map(e => e.event), ['session.start', 'session.end']);
+    assert.ok(events.every(e => e.actor === 'human'));
     db.close();
   });
 });

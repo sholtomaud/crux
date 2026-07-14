@@ -37,6 +37,11 @@
                padding: 0.1em 0.5em; font-family: monospace; font-size: 0.75rem; color: #ccc; margin-right: 0.35rem; }
     .critical-path { padding: 0.75rem 1rem; background: #1a1a1a; border-radius: 6px; font-size: 0.82rem; color: #ccc; margin-bottom: 1rem; }
     .critical-path .slug { color: #f87171; font-weight: 600; }
+    .session-widget { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1.25rem; }
+    .session-btn { font: inherit; font-size: 0.78rem; border-radius: 4px; padding: 0.4em 0.9em; cursor: pointer; }
+    .session-btn.start { background: #1a3a2a; color: #34d399; border: 1px solid #2a5a3a; }
+    .session-btn.stop  { background: #3a1a1a; color: #f87171; border: 1px solid #5a2a2a; }
+    .session-timer { font-family: monospace; font-size: 0.85rem; color: #ccc; }
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
     .stat { background: #1a1a1a; border-radius: 6px; padding: 0.75rem 1rem; }
     .stat-value { font-size: 1.4rem; font-weight: 700; color: #fff; }
@@ -69,12 +74,36 @@
       disc.textContent = row.hidden ? '▸' : '▾';
     }
 
+    let sessionTimerInterval = null;
+
+    function formatElapsed(ms) {
+      const totalSec = Math.max(0, Math.floor(ms / 1000));
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      return h > 0
+        ? `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+        : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    async function startSessionClick() {
+      try { await postJson(`/api/project/${id}/session/start`, {}); render(); }
+      catch (e) { alert(`Failed to start session: ${e.message}`); render(); }
+    }
+
+    async function stopSessionClick() {
+      try { await postJson(`/api/project/${id}/session/end`, {}); render(); }
+      catch (e) { alert(`Failed to stop session: ${e.message}`); render(); }
+    }
+
     async function render() {
       const content = document.getElementById('content');
       if (!id) { content.innerHTML = '<p>No project id in URL.</p>'; return; }
 
       document.getElementById('nav-graph').href = `/graph?id=${id}`;
       document.getElementById('nav-graph-wrap').hidden = false;
+
+      if (sessionTimerInterval) { clearInterval(sessionTimerInterval); sessionTimerInterval = null; }
 
       let data, cpm;
       try {
@@ -84,7 +113,7 @@
         ]);
       } catch (e) { content.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
 
-      const { project, tasks, status, roi, hours, deps } = data;
+      const { project, tasks, status, roi, hours, deps, session } = data;
 
       const slugById = new Map(tasks.map(t => [t.id, t.slug]));
       const predMap = {}, succMap = {};
@@ -123,6 +152,12 @@
       content.innerHTML = `
         <h1>${project.name}</h1>
         <div class="meta">${project.type} · ${project.status} · created ${project.created_at.slice(0,10)}</div>
+        <div class="session-widget">
+          ${session
+            ? `<button class="session-btn stop" onclick="stopSessionClick()">⏸ Stop session</button><span class="session-timer" id="session-timer"></span>`
+            : `<button class="session-btn start" onclick="startSessionClick()">▶ Start session</button>`
+          }
+        </div>
         <div class="stats">
           ${stats.map(s => `<div class="stat"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>`).join('')}
         </div>
@@ -170,6 +205,16 @@
           </tbody>
         </table>
       `;
+
+      if (session) {
+        const startMs = new Date(session.started_at.replace(' ', 'T') + 'Z').getTime();
+        const tick = () => {
+          const el = document.getElementById('session-timer');
+          if (el) el.textContent = formatElapsed(Date.now() - startMs);
+        };
+        tick();
+        sessionTimerInterval = setInterval(tick, 1000);
+      }
     }
 
     render();
