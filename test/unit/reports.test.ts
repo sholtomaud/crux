@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { reportTasks, reportStatus, reportOverview } from '../../lib/reports.ts';
+import { reportTasks, reportStatus, reportOverview, reportCalibration } from '../../lib/reports.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -30,11 +30,14 @@ function seedProject(db: DatabaseSync, name = 'test', type = 'code_repo') {
   return db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as { id: string; name: string; type: string; status: string; gh_repo: null; gh_sync: number; sheets_id: null; hourly_rate: null; created_at: string };
 }
 
-function seedTask(db: DatabaseSync, projectId: string, slug: string, opts: { title?: string; status?: string; phase?: string; duration_days?: number } = {}) {
+function seedTask(db: DatabaseSync, projectId: string, slug: string, opts: { title?: string; status?: string; phase?: string; duration_days?: number; actual_days?: number; estimated_by?: string } = {}) {
   db.prepare(`
-    INSERT INTO tasks (project_id, slug, title, status, phase, duration_days)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(projectId, slug, opts.title ?? slug, opts.status ?? 'open', opts.phase ?? null, opts.duration_days ?? null);
+    INSERT INTO tasks (project_id, slug, title, status, phase, duration_days, actual_days, estimated_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    projectId, slug, opts.title ?? slug, opts.status ?? 'open', opts.phase ?? null, opts.duration_days ?? null,
+    opts.actual_days ?? null, opts.estimated_by ?? 'human',
+  );
   return db.prepare('SELECT id FROM tasks WHERE project_id = ? AND slug = ?').get(projectId, slug) as { id: number };
 }
 
@@ -130,6 +133,37 @@ describe('reportStatus', () => {
     db.prepare('INSERT INTO dependencies (predecessor_id, successor_id) VALUES (?, ?)').run(a.id, b.id);
     const md = reportStatus(db, p as any);
     assert.ok(md.includes('Critical Path'));
+    db.close();
+  });
+});
+
+describe('reportCalibration', () => {
+  test('generates GENERATED header', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    const md = reportCalibration(db, p as any);
+    assert.ok(md.includes('<!-- GENERATED'));
+    db.close();
+  });
+
+  test('reports no-data message when nothing has actuals recorded', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    seedTask(db, p.id, 't1', { duration_days: 1 });
+    const md = reportCalibration(db, p as any);
+    assert.ok(md.includes('No tasks with both'));
+    db.close();
+  });
+
+  test('includes per-estimator table and overall line', () => {
+    const db = makeDb();
+    const p  = seedProject(db);
+    seedTask(db, p.id, 't1', { duration_days: 1, actual_days: 2, estimated_by: 'claude' });
+    seedTask(db, p.id, 't2', { duration_days: 2, actual_days: 1, estimated_by: 'human' });
+    const md = reportCalibration(db, p as any);
+    assert.ok(md.includes('| claude |'));
+    assert.ok(md.includes('| human |'));
+    assert.ok(md.includes('**Overall:** 2 tasks'));
     db.close();
   });
 });

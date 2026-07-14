@@ -35,7 +35,7 @@ import type { Project, ProjectType, RunEnv, TaskStatus, TaskType, TaskExecutor }
 import { computeCpm, asciiDag, dotGraph } from './lib/cpm.ts';
 import type { CpmNode, CpmEdge } from './lib/cpm.ts';
 
-import { reportTasks, reportStatus, reportOverview } from './lib/reports.ts';
+import { reportTasks, reportStatus, reportOverview, reportCalibration } from './lib/reports.ts';
 import { formatProjectList } from './lib/cli-format.ts';
 import { resolveActiveProject } from './lib/project-resolution.ts';
 import { ask }    from './lib/ask.ts';
@@ -604,6 +604,15 @@ function cmdReport(args: string[]): void {
     return;
   }
 
+  if (sub === 'calibration') {
+    const md  = reportCalibration(db, proj);
+    mkdirSync('docs', { recursive: true });
+    const out = join('docs', 'calibration.md');
+    writeFileSync(out, md);
+    console.log(`✓ Written to ${out}`);
+    return;
+  }
+
   if (sub === 'adrs') {
     const adrs = listAdrs(db, proj.id);
     if (adrs.length === 0) { console.log('No ADRs to generate.'); return; }
@@ -636,7 +645,7 @@ function cmdReport(args: string[]): void {
     return;
   }
 
-  console.error('Usage: crux report tasks|status|adrs');
+  console.error('Usage: crux report tasks|status|adrs|calibration');
 }
 
 // ── sync ──────────────────────────────────────────────────────────────────────
@@ -1354,13 +1363,14 @@ The agent reads these fields to write correct tests grounded in the real codebas
     }
   );
 
-  server.tool('crux_report', 'Generate tasks.md, docs/status-{date}.md, or ADRs',
-    { kind: z.enum(['tasks','status','adrs']) },
+  server.tool('crux_report', 'Generate tasks.md, docs/status-{date}.md, calibration.md, or ADRs',
+    { kind: z.enum(['tasks','status','adrs','calibration']) },
     ({ kind }) => {
       try {
         const proj = requireProject();
-        if (kind === 'tasks')  return ok({ content: reportTasks(db, proj) });
-        if (kind === 'status') return ok({ content: reportStatus(db, proj) });
+        if (kind === 'tasks')       return ok({ content: reportTasks(db, proj) });
+        if (kind === 'status')      return ok({ content: reportStatus(db, proj) });
+        if (kind === 'calibration') return ok({ content: reportCalibration(db, proj) });
         return ok({ message: 'Use crux report adrs from CLI for per-ADR file generation.' });
       } catch (e: unknown) { return err((e as Error).message); }
     }
