@@ -7,39 +7,33 @@
   <link rel="manifest" href="/manifest.json">
   <title>crux — ROI Dashboard</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; padding: 2rem; }
-    a { color: #60a5fa; text-decoration: none; }
-    h1 { font-size: 1.4rem; color: #fff; margin-bottom: 0.25rem; }
-    h2 { font-size: 0.95rem; color: #aaa; margin: 1.5rem 0 0.75rem; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    th { text-align: left; color: #888; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2a2a; }
-    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #1e1e1e; }
-    .warn { color: #f59e0b; }
-    .ok   { color: #34d399; }
-    .na   { color: #555; }
-    .signal-box { margin-top: 2rem; padding: 1rem; background: #1a1a1a; border-radius: 8px; border-left: 3px solid #f59e0b; }
-    .signal-box h2 { font-size: 0.85rem; color: #f59e0b; margin-bottom: 0.5rem; margin-top: 0; }
+    h1 { font-size: 1.4rem; color: var(--color-text-bright); margin-bottom: 1.5rem; }
+    .warn { color: var(--color-warning); }
+    .ok   { color: var(--color-primary); }
+    .na   { color: var(--color-text-dimmer); }
+    .signal-box { margin-top: 2rem; padding: 1rem; background: var(--color-surface-container); border-radius: var(--radius); border-left: 3px solid var(--color-warning); }
+    .signal-box h2 { font-size: 0.85rem; color: var(--color-warning); margin-bottom: 0.5rem; margin-top: 0; }
     .signal-box p { font-size: 0.82rem; color: #ccc; line-height: 1.7; }
-    .loading { color: #666; }
   </style>
 </head>
 <body>
-  <p><a href="/">← all projects</a></p>
-  <h1>ROI Dashboard</h1>
-  <div id="content"><p class="loading">Loading…</p></div>
+  <div id="app-main">
+    <h1>ROI Dashboard</h1>
+    <div id="content"><p class="loading">Loading…</p></div>
+  </div>
 
   <script src="/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
-    renderNav('roi');
     const BASELINE = 150; // AUD/hr — update to match config
 
     async function render() {
+      renderAgentPanel();
+      await renderSidebar('roi');
       const content = document.getElementById('content');
       let data;
       try { data = await fetchJson('/api/roi'); }
-      catch (e) { content.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
+      catch (e) { content.innerHTML = `<p class="error">Error: ${e.message}</p>`; return; }
 
       const warnings = [];
       const active = data.filter(p => p.status === 'active');

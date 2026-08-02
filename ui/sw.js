@@ -1,6 +1,6 @@
 // crux service worker — cache-first for static assets, network-first for /api/*
 
-const CACHE  = 'crux-v1';
+const CACHE  = 'crux-v2';
 const STATIC = ['/', '/app.js', '/manifest.json', '/sw.js', '/icon.svg'];
 
 self.addEventListener('install', e => {
