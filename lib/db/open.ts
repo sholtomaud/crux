@@ -66,6 +66,9 @@ export function applyMigrations(db: DatabaseSync): void {
     db.exec(`ALTER TABLE tasks ADD COLUMN estimated_by TEXT NOT NULL DEFAULT 'human'
              CHECK(estimated_by IN ('human','claude','auto'));`);
   }
+  if (!taskCols.includes('worktree_path')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN worktree_path TEXT;');
+  }
 
   // projects migrations
   if (!projCols.includes('project_number')) {

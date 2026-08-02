@@ -74,6 +74,7 @@ export interface Task {
   float_days: number | null;
   is_critical: number;
   gh_issue_number: number | null;
+  worktree_path: string | null;
   coverage_target: number | null;
   value_score: number | null;
   task_type: TaskType;

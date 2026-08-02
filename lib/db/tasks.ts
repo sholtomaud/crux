@@ -92,8 +92,16 @@ export function updateTaskGhIssue(db: DatabaseSync, taskId: number, ghIssueNumbe
   db.prepare('UPDATE tasks SET gh_issue_number = ? WHERE id = ?').run(ghIssueNumber, taskId);
 }
 
+export function updateTaskWorktreePath(db: DatabaseSync, taskId: number, worktreePath: string): void {
+  db.prepare('UPDATE tasks SET worktree_path = ? WHERE id = ?').run(worktreePath, taskId);
+}
+
 export function updateTaskType(db: DatabaseSync, taskId: number, taskType: TaskType): void {
   db.prepare('UPDATE tasks SET task_type = ? WHERE id = ?').run(taskType, taskId);
+}
+
+export function updateTaskExecutor(db: DatabaseSync, taskId: number, executor: TaskExecutor): void {
+  db.prepare('UPDATE tasks SET executor = ? WHERE id = ?').run(executor, taskId);
 }
 
 export function updateTaskProject(db: DatabaseSync, taskId: number, projectId: string): void {
@@ -110,6 +118,22 @@ export function updateTaskSpec(
   }
   if (opts.files_affected !== undefined) {
     db.prepare('UPDATE tasks SET files_affected = ? WHERE id = ?').run(JSON.stringify(opts.files_affected), taskId);
+  }
+}
+
+export function updateTaskFields(
+  db: DatabaseSync,
+  taskId: number,
+  opts: { phase?: string; description?: string; duration_days?: number }
+): void {
+  if (opts.phase !== undefined) {
+    db.prepare('UPDATE tasks SET phase = ? WHERE id = ?').run(opts.phase, taskId);
+  }
+  if (opts.description !== undefined) {
+    db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run(opts.description, taskId);
+  }
+  if (opts.duration_days !== undefined) {
+    db.prepare('UPDATE tasks SET duration_days = ? WHERE id = ?').run(opts.duration_days, taskId);
   }
 }
 
