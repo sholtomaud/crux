@@ -7,32 +7,28 @@
   <link rel="manifest" href="/manifest.json">
   <title>crux — DB Explorer</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; padding: 2rem; }
-    a { color: #60a5fa; text-decoration: none; }
-    h1 { font-size: 1.4rem; color: #fff; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.4rem; color: var(--color-text-bright); margin-bottom: 1.5rem; }
     .tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-    .tab { padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid #333; font-size: 0.8rem; cursor: pointer; background: #1a1a1a; color: #aaa; }
-    .tab.active { background: #252525; color: #fff; border-color: #555; }
+    .tab { padding: 0.4rem 0.9rem; border-radius: var(--radius-sm); border: 1px solid var(--color-border-strong);
+           font-size: 0.8rem; cursor: pointer; background: var(--color-surface-container); color: #aaa; }
+    .tab.active { background: var(--color-surface-container-highest); color: var(--color-text-bright); border-color: #555; }
     #table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
-    th { text-align: left; color: #888; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2a2a; white-space: nowrap; }
-    td { padding: 0.35rem 0.6rem; border-bottom: 1px solid #1a1a1a; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-    .loading { color: #666; font-size: 0.9rem; }
-    .count { font-size: 0.78rem; color: #555; margin-bottom: 0.75rem; }
+    td { white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+    th { white-space: nowrap; }
+    .count { font-size: 0.78rem; color: var(--color-text-dimmer); margin-bottom: 0.75rem; }
   </style>
 </head>
 <body>
-  <p><a href="/">← all projects</a></p>
-  <h1>DB Explorer</h1>
-  <div class="tabs" id="tabs"></div>
-  <div class="count" id="count"></div>
-  <div id="table-wrap"><p class="loading">Select a table above.</p></div>
+  <div id="app-main">
+    <h1>DB Explorer</h1>
+    <div class="tabs" id="tabs"></div>
+    <div class="count" id="count"></div>
+    <div id="table-wrap"><p class="loading">Select a table above.</p></div>
+  </div>
 
   <script src="/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
-    renderNav('db');
     const TABLES = ['projects','tasks','dependencies','sessions','roi_records','test_runs','audit','adrs','task_adrs'];
     let active = null;
 
@@ -54,7 +50,7 @@
       wrap.innerHTML = '<p class="loading">Loading…</p>';
       let rows;
       try { rows = await fetchJson(`/api/db/${name}`); }
-      catch (e) { wrap.innerHTML = `<p style="color:#f87171">Error: ${e.message}</p>`; return; }
+      catch (e) { wrap.innerHTML = `<p class="error">Error: ${e.message}</p>`; return; }
 
       if (rows.length === 0) { wrap.innerHTML = '<p class="loading">(empty)</p>'; countEl.textContent = '0 rows'; return; }
       countEl.textContent = `${rows.length} rows`;
@@ -69,7 +65,7 @@
         </table>`;
     }
 
-    loadTable('projects');
+    (async () => { renderAgentPanel(); await renderSidebar('db'); loadTable('projects'); })();
   </script>
 </body>
 </html>

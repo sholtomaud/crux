@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     is_critical      INTEGER NOT NULL DEFAULT 0 CHECK(is_critical IN (0,1)),
     -- integrations
     gh_issue_number  INTEGER,
+    worktree_path    TEXT,           -- absolute path of this task's isolated git worktree, if any
     coverage_target  REAL,           -- auto-close when test_run.coverage >= this
     value_score      REAL,           -- business value 0-100, wsjf = value_score / duration_days
     task_type            TEXT NOT NULL DEFAULT 'coding' CHECK(task_type IN ('coding','writing','research','accounting','verification','design','other')),

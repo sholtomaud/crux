@@ -15,14 +15,16 @@ import { spawnSync } from 'node:child_process';
 import {
   openDb, closeDb, findRepoRoot, readProjectPointer, writeProjectPointer,
   resolveProject, insertProject, projectById, allProjects, resolveProjectByQuery, updateProjectStatus, updateProjectGhRepo, updateProjectRepoPath, updateTaskGhIssue, updateTaskValueScore, updateTaskActualDays, updateTaskPriority,
-  tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskProject, updateTaskCpm,
-  addDependency, dependenciesByProject,
+  tasksByProject, taskBySlug, insertTask, updateTaskStatus, updateTaskProject, updateTaskWorktreePath, updateTaskCpm,
+  addDependency, dependenciesByProject, taskNeighbours,
   startSession, endSession, activeSession, updateSessionContainerName,
-  insertRoi, roiSummary, totalHours,
-  insertTestRun, logAudit, recentAudit, projectStatus,
+  insertRoi, roiSummary, totalHours, firstRevenueAt,
+  insertTestRun, logAudit, logFieldChange, recentAudit, auditByTask, projectStatus,
   insertAdr, listAdrs,
   updateTaskType,
+  updateTaskExecutor,
   updateTaskSpec,
+  updateTaskFields,
   updateProjectEnv,
   updateProjectEnvFromFlags,
   getActiveProjectId,
@@ -30,14 +32,14 @@ import {
   PROJECT_TYPES, PROJECT_STATUSES, TASK_STATUSES, TASK_TYPES, TASK_EXECUTORS,
   ESTIMATED_BY_VALUES, RUN_ENVS, ROI_KINDS, TEST_PHASES, TEST_RUN_STATUSES, ADR_STATUSES,
 } from './lib/db.ts';
-import type { Project, ProjectType, RunEnv, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
+import type { Project, ProjectType, RunEnv, Task, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
 
 import { computeCpm, asciiDag, dotGraph } from './lib/cpm.ts';
 import type { CpmNode, CpmEdge } from './lib/cpm.ts';
 
 import { reportTasks, reportStatus, reportOverview, reportCalibration } from './lib/reports.ts';
-import { formatProjectList } from './lib/cli-format.ts';
-import { resolveActiveProject } from './lib/project-resolution.ts';
+import { formatProjectList, formatTaskDetail } from './lib/cli-format.ts';
+import { resolveActiveProject, relinkCwdIfLinked } from './lib/project-resolution.ts';
 import { ask }    from './lib/ask.ts';
 import { exportCsv, syncToSheets } from './lib/sheets.ts';
 import { startServer, updateProjectStatusHandler } from './lib/server.ts';
@@ -45,7 +47,7 @@ import { readCruxConfig, writeCruxConfig } from './lib/config.ts';
 import { agentContext } from './lib/codebase.ts';
 import { syncTasks } from './lib/gh.ts';
 import { runAgent } from './lib/agent.ts';
-import { runWorkflow, gitCommitFiles, gitPushBranch } from './lib/workflow.ts';
+import { runWorkflow, gitCommitFiles, gitPushBranch, createTaskWorktree, resolveTaskCwd, currentBranch } from './lib/workflow.ts';
 
 // ── Mode detection ─────────────────────────────────────────────────────────────
 // CLI: args present, or stdin is a TTY
@@ -144,11 +146,13 @@ STATUS
 
 TASKS
   task add <slug> <title>        Add task [--type coding|writing|research|accounting|verification|design|other]
+  task show <slug>               Full detail: spec, CPM, deps, recent activity
   task type <slug> <type>        Set task type
   task done <slug> [--note ""]   Mark done
   task start <slug>              Mark in-progress
   task block <slug> [--note ""]  Mark blocked
   task move <slug> <project>     Reassign task to another project (id|number|name)
+  task worktree <slug>           Create isolated git worktree + feat/<slug> branch
   dep add <pred> <succ>          Add predecessor→successor dependency
 
 SCHEDULE
@@ -412,6 +416,13 @@ function cmdTask(args: string[]): void {
 
   if (!slug || !task) { console.error(`Task not found: ${slug}`); process.exit(1); }
 
+  // Handle `crux task show <slug>` — full detail for one task (read-only)
+  if (sub === 'show') {
+    const { predecessors, successors } = taskNeighbours(db, task.id);
+    console.log(formatTaskDetail(task, { predecessors, successors, audit: auditByTask(db, task.id, 8) }));
+    return;
+  }
+
   // Handle `crux task type <slug> <type>` or `crux task update <slug> --type <type>`
   if (sub === 'type' || (sub === 'update' && typeFlag)) {
     const newType = (sub === 'type' ? args[2] : typeFlag) as TaskType;
@@ -440,6 +451,29 @@ function cmdTask(args: string[]): void {
     updateTaskProject(db, task.id, target.id);
     logAudit(db, { project_id: target.id, task_id: task.id, event: 'task.move', detail: `${proj.name} → ${target.name}`, actor: 'human' });
     console.log(`✓ ${slug} moved: ${proj.name} → ${target.name}`);
+    return;
+  }
+
+  // Handle `crux task worktree <slug>` — isolated git worktree + feat/<slug> branch
+  if (sub === 'worktree') {
+    // A recorded path whose directory is gone is stale, not a conflict — the
+    // worktree may have been deleted by hand. Recreate rather than refusing
+    // forever (resolveTaskCwd applies the same existsSync test when reading).
+    if (task.worktree_path && existsSync(task.worktree_path)) {
+      console.error(`${slug} already has a worktree: ${task.worktree_path}`); process.exit(1);
+    }
+    if (task.worktree_path) console.log(`  (recorded worktree ${task.worktree_path} no longer exists — recreating)`);
+    const repoRoot = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+    const result = createTaskWorktree(repoRoot, slug);
+    if (!result.ok) { console.error(result.out); process.exit(1); }
+    updateTaskWorktreePath(db, task.id, result.path!);
+    logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.worktree', detail: result.path, actor: 'human' });
+    console.log(`✓ Worktree created: ${result.path} (branch ${result.branch})`);
+    const at = result.base ? ` at ${result.base.slice(0, 8)}` : '';
+    console.log(result.remote
+      ? `  Based on ${result.base_ref}${at} — local main is ${result.ahead ?? 0} ahead, ${result.behind ?? 0} behind ${result.remote}`
+      : `  Based on ${result.base_ref}${at} — no remote configured, branched locally`);
+    console.log(`  cd ${result.path}`);
     return;
   }
 
@@ -1199,6 +1233,27 @@ async function runMcpServer(): Promise<void> {
     }
   );
 
+  server.tool(
+    'crux_task_show',
+    'Full detail for ONE task: spec fields (description, acceptance_criteria, files), CPM numbers, immediate dependencies, and recent audit entries. Use this instead of crux_project_context when you only need to understand a single task — context returns every open task and costs far more.',
+    { slug: z.string().describe('Task slug') },
+    ({ slug }) => {
+      try {
+        const proj = requireProject();
+        const task = taskBySlug(db, proj.id, slug);
+        if (!task) return err(`Task not found: ${slug}`);
+        const { predecessors, successors } = taskNeighbours(db, task.id);
+        const ref = (t: typeof task) => ({ slug: t.slug, title: t.title, status: t.status });
+        return ok({
+          task,
+          predecessors: predecessors.map(ref),
+          successors: successors.map(ref),
+          audit: auditByTask(db, task.id, 8),
+        });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
   server.tool('crux_overview', 'All projects: status, ROI, active count, spread warning', {},
     () => {
       try {
@@ -1206,7 +1261,7 @@ async function runMcpServer(): Promise<void> {
           const tasks = tasksByProject(db, p.id);
           const roi   = roiSummary(db, p.id);
           const hours = totalHours(db, p.id);
-          return { number: p.project_number, ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours };
+          return { number: p.project_number, ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours, first_revenue_at: firstRevenueAt(db, p.id) };
         });
         const active = projects.filter(p => p.status === 'active').length;
         return ok({ projects, spread_warning: active > 2 ? `${active} active projects — peak focus is 2` : null });
@@ -1247,6 +1302,7 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
     {
       slug: z.string().describe('kebab-case identifier, e.g. p16-time-to-first-dollar'),
       title: z.string().describe('Short imperative title'),
+      executor: z.enum(TASK_EXECUTORS).describe('Who can complete this: "llm" = safe for autonomous agentic pickup with no human judgment needed, "human" = requires a person (judgment call, external action, credentials), "hybrid" = agent does the work but a human must review/approve, "auto" = unknown/let the router decide later. Pick the narrowest true answer — do not default to "auto".'),
       description: z.string().optional().describe('Full description of what to build and why'),
       phase: z.string().optional(),
       duration_days: z.number().optional(),
@@ -1257,7 +1313,7 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
       acceptance_criteria: z.string().optional().describe('REQUIRED for coding/writing/research. Testable done condition. For coding: name the exact functions/fields to add, what tests must assert, which DB pattern to follow.'),
       files_affected: z.array(z.string()).optional().describe('REQUIRED for coding. Exact file paths that will be modified, e.g. ["lib/db.ts","index.ts","schema.sql"]'),
     },
-    ({ slug, title, description, phase, duration_days, coverage_target, value_score, priority, task_type, acceptance_criteria, files_affected }) => {
+    ({ slug, title, executor, description, phase, duration_days, coverage_target, value_score, priority, task_type, acceptance_criteria, files_affected }) => {
       try {
         const proj = requireProject();
         const type = task_type ?? 'coding';
@@ -1279,39 +1335,63 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
           );
         }
 
-        const task = insertTask(db, { project_id: proj.id, slug, title, description, phase, priority, duration_days, coverage_target, value_score, task_type: type, acceptance_criteria, files_affected });
+        const task = insertTask(db, { project_id: proj.id, slug, title, executor, description, phase, priority, duration_days, coverage_target, value_score, task_type: type, acceptance_criteria, files_affected });
         logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.add', detail: title, actor: 'claude' });
         return ok(task);
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
 
+  // Planning-field patch shared by crux_task_update and crux_task_bulk_update:
+  // write only the supplied fields, and audit each one as before → after.
+  const applyTaskFields = (
+    projectId: string,
+    task: Task,
+    patch: { phase?: string; description?: string; duration_days?: number },
+  ): void => {
+    if (patch.phase == null && patch.description == null && patch.duration_days == null) return;
+    updateTaskFields(db, task.id, patch);
+    const changed: Array<[string, unknown, unknown]> = [];
+    if (patch.phase != null)         changed.push(['phase', task.phase, patch.phase]);
+    if (patch.description != null)   changed.push(['description', task.description, patch.description]);
+    if (patch.duration_days != null) changed.push(['duration_days', task.duration_days, patch.duration_days]);
+    for (const [field, before, after] of changed)
+      logFieldChange(db, { project_id: projectId, task_id: task.id, field, before, after, actor: 'claude' });
+  };
+
   server.tool(
     'crux_task_update',
-    `Update task status, type, spec fields, or value score (audit logged).
+    `Update task status, type, spec fields, planning fields (phase/description/duration_days), or value score (audit logged).
 Use acceptance_criteria and files_affected to add spec to under-specified tasks before running the agent.
-The agent reads these fields to write correct tests grounded in the real codebase API.`,
+The agent reads these fields to write correct tests grounded in the real codebase API.
+Omitted fields are left unchanged, so this is also the supported way to correct a wrong phase label or a stale description.`,
     {
       slug: z.string(),
       status: z.enum(TASK_STATUSES),
       note: z.string().optional(),
+      phase: z.string().optional().describe('Phase/grouping label, e.g. "MCP correctness" — replaces the existing label'),
+      description: z.string().optional().describe('Full description of what to build and why — replaces the existing description'),
+      duration_days: z.number().min(0).optional().describe('Estimated effort in days. Changing this invalidates the CPM schedule — run crux_cpm afterwards to reschedule.'),
       value_score: z.number().min(0).max(100).optional(),
       priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
       task_type: z.enum(TASK_TYPES).optional(),
+      executor: z.enum(TASK_EXECUTORS).optional().describe('Who can complete this: "llm" = safe for autonomous agentic pickup, "human" = requires a person, "hybrid" = agent does the work but a human must review/approve, "auto" = unknown/let the router decide.'),
       acceptance_criteria: z.string().optional().describe('Testable done condition. For coding: name exact functions/fields, what tests assert, which existing pattern to follow (e.g. "see insertRoi() in lib/db.ts").'),
       files_affected: z.array(z.string()).optional().describe('Exact file paths that will be modified'),
       actual_days: z.number().optional().describe('Actual time spent on this task — record when setting status to done'),
       estimated_by: z.enum(ESTIMATED_BY_VALUES).optional().describe('Who produced the original duration_days estimate, for calibration'),
     },
-    ({ slug, status, note, value_score, priority, task_type, acceptance_criteria, files_affected, actual_days, estimated_by }) => {
+    ({ slug, status, note, phase, description, duration_days, value_score, priority, task_type, executor, acceptance_criteria, files_affected, actual_days, estimated_by }) => {
       try {
         const proj = requireProject();
         const task = taskBySlug(db, proj.id, slug);
         if (!task) return err(`Task not found: ${slug}`);
         updateTaskStatus(db, proj.id, slug, status);
+        applyTaskFields(proj.id, task, { phase, description, duration_days });
         if (value_score != null) updateTaskValueScore(db, task.id, value_score);
         if (priority != null) updateTaskPriority(db, task.id, priority);
         if (task_type != null) updateTaskType(db, task.id, task_type);
+        if (executor != null) updateTaskExecutor(db, task.id, executor);
         if (acceptance_criteria != null || files_affected != null)
           updateTaskSpec(db, task.id, { acceptance_criteria: acceptance_criteria ?? undefined, files_affected: files_affected ?? undefined });
         if (actual_days != null) updateTaskActualDays(db, task.id, actual_days, estimated_by);
@@ -1319,7 +1399,85 @@ The agent reads these fields to write correct tests grounded in the real codebas
         const calibrationNote = status === 'done' && actual_days == null
           ? 'Consider recording actual_days on this call for estimation calibration.'
           : undefined;
-        return ok({ slug, status, note, value_score: value_score ?? task.value_score, priority: priority ?? task.priority, task_type: task_type ?? task.task_type, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote });
+        return ok({ slug, status, note, phase: phase ?? task.phase, duration_days: duration_days ?? task.duration_days, ...(description != null ? { description_updated: true } : {}), value_score: value_score ?? task.value_score, priority: priority ?? task.priority, task_type: task_type ?? task.task_type, executor: executor ?? task.executor, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  server.tool(
+    'crux_task_bulk_update',
+    `Apply patches to multiple tasks in one call (audit logged per task).
+Use for batch re-triage — e.g. correcting executor on several tasks after crux_spread_check or a manual review flags them.
+Each entry only touches the fields it sets; omitted fields are left unchanged. Unlike crux_task_update, status is optional per entry.
+A bad slug in one entry does not block the others — check each entry's "ok" field in the response.`,
+    {
+      updates: z.array(z.object({
+        slug: z.string(),
+        status: z.enum(TASK_STATUSES).optional(),
+        note: z.string().optional(),
+        phase: z.string().optional().describe('Phase/grouping label — replaces the existing label'),
+        description: z.string().optional().describe('Replaces the existing description'),
+        duration_days: z.number().min(0).optional().describe('Estimated effort in days. Changing this invalidates the CPM schedule — run crux_cpm afterwards to reschedule.'),
+        value_score: z.number().min(0).max(100).optional(),
+        priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
+        task_type: z.enum(TASK_TYPES).optional(),
+        executor: z.enum(TASK_EXECUTORS).optional().describe('Who can complete this: "llm" = safe for autonomous agentic pickup, "human" = requires a person, "hybrid" = agent does the work but a human must review/approve, "auto" = unknown/let the router decide.'),
+        acceptance_criteria: z.string().optional(),
+        files_affected: z.array(z.string()).optional(),
+        actual_days: z.number().optional(),
+        estimated_by: z.enum(ESTIMATED_BY_VALUES).optional(),
+      })).min(1).max(100),
+    },
+    ({ updates }) => {
+      try {
+        const proj = requireProject();
+        const results = updates.map(u => {
+          try {
+            const task = taskBySlug(db, proj.id, u.slug);
+            if (!task) return { slug: u.slug, ok: false, error: `Task not found: ${u.slug}` };
+            if (u.status != null) updateTaskStatus(db, proj.id, u.slug, u.status);
+            applyTaskFields(proj.id, task, { phase: u.phase, description: u.description, duration_days: u.duration_days });
+            if (u.value_score != null) updateTaskValueScore(db, task.id, u.value_score);
+            if (u.priority != null) updateTaskPriority(db, task.id, u.priority);
+            if (u.task_type != null) updateTaskType(db, task.id, u.task_type);
+            if (u.executor != null) updateTaskExecutor(db, task.id, u.executor);
+            if (u.acceptance_criteria != null || u.files_affected != null)
+              updateTaskSpec(db, task.id, { acceptance_criteria: u.acceptance_criteria ?? undefined, files_affected: u.files_affected ?? undefined });
+            if (u.actual_days != null) updateTaskActualDays(db, task.id, u.actual_days, u.estimated_by);
+            logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.bulk_update', detail: u.note, actor: 'claude' });
+            return { slug: u.slug, ok: true };
+          } catch (e: unknown) {
+            return { slug: u.slug, ok: false, error: (e as Error).message };
+          }
+        });
+        const failed = results.filter(r => !r.ok).length;
+        return ok({ total: updates.length, succeeded: updates.length - failed, failed, results });
+      } catch (e: unknown) { return err((e as Error).message); }
+    }
+  );
+
+  server.tool('crux_task_worktree',
+    'Create an isolated git worktree + feat/<slug> branch for this task, as a sibling directory of the repo, so the task never collides with other in-flight work in the primary checkout. The autonomous engine creates one per task too (runWorkflow), and falls back to the primary checkout only if creation fails. Isolation guarantee: separate working directory and branch per task; commits are refused if the checkout is on another task\'s branch, or if a file was already modified before the run started. Fetches before branching and reports what it branched from (remote/base/base_ref/ahead/behind). If a recorded worktree directory was deleted by hand, calling this again recreates it and re-attaches to the existing branch, preserving its commits.',
+    { slug: z.string() },
+    ({ slug }) => {
+      try {
+        const proj = requireProject();
+        const task = taskBySlug(db, proj.id, slug);
+        if (!task) return err(`Task not found: ${slug}`);
+        // Stale path (directory deleted by hand) → recreate, don't refuse forever.
+        if (task.worktree_path && existsSync(task.worktree_path)) {
+          return err(`${slug} already has a worktree: ${task.worktree_path}`);
+        }
+        const repoRoot = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+        const result = createTaskWorktree(repoRoot, slug);
+        if (!result.ok) return err(result.out);
+        updateTaskWorktreePath(db, task.id, result.path!);
+        logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.worktree', detail: result.path, actor: 'claude' });
+        return ok({
+          path: result.path, branch: result.branch,
+          remote: result.remote, base: result.base, base_ref: result.base_ref,
+          ahead: result.ahead, behind: result.behind,
+        });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -1640,7 +1798,7 @@ The agent reads these fields to write correct tests grounded in the real codebas
 
   // ── Project switch ────────────────────────────────────────────────────────
   server.tool('crux_switch',
-    'Switch the active project for all MCP tools. Pass a project name (partial match) or full project ID. All subsequent tool calls operate on this project until switched again.',
+    'Switch the active project for all MCP tools. Pass a project name (partial match) or full project ID. All subsequent tool calls operate on this project until switched again. If the current directory is itself linked to a project (.crux/project.json), that link is re-pointed too — otherwise a directory link always takes precedence over this switch and it would silently have no effect for this session.',
     { project: z.string().describe('Project name (partial match) or UUID') },
     ({ project }) => {
       try {
@@ -1655,13 +1813,18 @@ The agent reads these fields to write correct tests grounded in the real codebas
           return err(`No project matching "${project}". Available: ${names}`);
         }
         setActiveProjectId(db, match.id);
-        const projRoot = match.repo_path ?? findRepoRoot() ?? process.cwd();
+
+        const cwdRoot = findRepoRoot();
+        const hadCwdLink = relinkCwdIfLinked(cwdRoot, match.id);
+
+        const projRoot = match.repo_path ?? cwdRoot ?? process.cwd();
         return ok({
-          switched_to:   match.name,
-          id:            match.id,
-          type:          match.type,
-          run_env:       match.run_env,
-          agent_context: agentContext(projRoot, match.type),
+          switched_to:      match.name,
+          id:               match.id,
+          type:             match.type,
+          run_env:          match.run_env,
+          cwd_relinked:     hadCwdLink,
+          agent_context:    agentContext(projRoot, match.type),
         });
       } catch (e: unknown) { return err((e as Error).message); }
     }
@@ -1669,45 +1832,52 @@ The agent reads these fields to write correct tests grounded in the real codebas
 
   // ── Standalone git tools (interactive work — not the full autonomous workflow) ─
   server.tool('crux_git_commit',
-    'Commit files with a message in the current repo. For incremental interactive work — does not run the full branch/test/push/PR pipeline (see crux agent for that).',
-    { message: z.string(), files: z.array(z.string()).min(1) },
-    ({ message, files }) => {
+    'Commit files with a message in the current repo. For incremental interactive work — does not run the full branch/test/push/PR pipeline (see crux agent for that). Pass slug if the task has an isolated worktree (created via crux_task_worktree) — without it, this always targets the primary repo checkout and cannot reach files that only exist in a worktree.',
+    { message: z.string(), files: z.array(z.string()).min(1), slug: z.string().optional().describe('Task slug — targets that task\'s worktree if one exists, otherwise the primary repo checkout') },
+    ({ message, files, slug }) => {
       try {
         const proj = requireProject();
-        const cwd  = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+        const repoRoot = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+        const cwd  = resolveTaskCwd(db, proj.id, repoRoot, slug);
         const result = gitCommitFiles(cwd, message, files);
         if (!result.ok) return err(result.out || 'commit failed');
         logAudit(db, { project_id: proj.id, event: 'git.commit', detail: message, actor: 'claude' });
-        return ok({ message, files });
+        return ok({ message, files, root: result.root, branch: result.branch });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
 
   server.tool('crux_git_push',
-    'Push the current branch (or a named one) to origin. Optionally commit first: pass message + files to commit-then-push in one call (e.g. once all of a task\'s acceptance criteria are met). For incremental interactive work.',
+    'Push the current branch (or a named one) to origin. Optionally commit first: pass message + files to commit-then-push in one call (e.g. once all of a task\'s acceptance criteria are met). For incremental interactive work. Pass slug if the task has an isolated worktree (created via crux_task_worktree) — without it, this always targets the primary repo checkout and cannot reach files that only exist in a worktree.',
     {
       branch:  z.string().optional(),
       message: z.string().optional().describe('If set (with files), commit before pushing'),
       files:   z.array(z.string()).optional().describe('Files to commit; required if message is set'),
+      slug:    z.string().optional().describe('Task slug — targets that task\'s worktree if one exists, otherwise the primary repo checkout'),
     },
-    ({ branch, message, files }) => {
+    ({ branch, message, files, slug }) => {
       try {
         const proj = requireProject();
-        const cwd  = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+        const repoRoot = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+        const cwd  = resolveTaskCwd(db, proj.id, repoRoot, slug);
 
-        let committed: { message: string; files: string[] } | null = null;
+        let committed: { message: string; files: string[]; root?: string; branch?: string } | null = null;
+        // Push from wherever the commit actually landed — the files may belong to
+        // a task worktree that the caller's cwd/slug didn't point at.
+        let pushCwd = cwd;
         if (message) {
           if (!files || files.length === 0) return err('files is required when message is set');
           const commitResult = gitCommitFiles(cwd, message, files);
           if (!commitResult.ok) return err(commitResult.out || 'commit failed');
           logAudit(db, { project_id: proj.id, event: 'git.commit', detail: message, actor: 'claude' });
-          committed = { message, files };
+          committed = { message, files, root: commitResult.root, branch: commitResult.branch };
+          if (commitResult.root) pushCwd = commitResult.root;
         }
 
-        const result = gitPushBranch(cwd, branch);
+        const result = gitPushBranch(pushCwd, branch);
         if (!result.ok) return err(result.out || 'push failed');
         logAudit(db, { project_id: proj.id, event: 'git.push', detail: branch, actor: 'claude' });
-        return ok({ pushed: true, branch: branch ?? '(current)', committed });
+        return ok({ pushed: true, branch: branch ?? currentBranch(pushCwd) ?? '(current)', root: pushCwd, committed });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -1776,7 +1946,7 @@ For: strategy across projects, architecture decisions, ambiguous priorities unde
 Action: run \`crux overview\` and \`crux cpm\` first to load current state, then reason.
 
 ## Available MCP Tools
-crux_init, crux_status, crux_overview, crux_cpm, crux_task_add, crux_task_update,
+crux_init, crux_status, crux_overview, crux_cpm, crux_task_add, crux_task_update, crux_task_bulk_update,
 crux_dep_add, crux_sync, crux_report, crux_ready, crux_graph, crux_test_run,
 crux_milestone_check, crux_session_start, crux_session_end, crux_roi_record,
 crux_roi_report, crux_spread_check, crux_project_add, crux_project_link, crux_ask,

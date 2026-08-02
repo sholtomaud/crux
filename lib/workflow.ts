@@ -14,11 +14,11 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, dirname, basename, isAbsolute } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from './ask.ts';
-import { updateTaskStatus, logAudit, listAdrs, dependenciesByProject, tasksByProject, activeSession } from './db.ts';
+import { updateTaskStatus, logAudit, listAdrs, dependenciesByProject, tasksByProject, taskBySlug, activeSession, findRepoRoot, updateTaskWorktreePath } from './db.ts';
 import type { Project, Task, TaskType } from './db.ts';
 import { readDbSignatures, readTestPattern } from './codebase.ts';
 
@@ -60,6 +60,11 @@ interface StepContext {
   proj:          Project;
   task:          Task;
   branch:        string;
+  cwd:           string;
+  usingWorktree: boolean;
+  /** Paths already dirty when the run started — never this run's work, so never
+   *  swept into its commits (see commitGuard). */
+  preexistingDirty: string[];
   log:           (s: string) => void;
   llm:           LlmConfig;
   containerName: string | null;
@@ -85,18 +90,186 @@ function git(args: string[], cwd: string, log: (s: string) => void): { ok: boole
 // as opposed to stepCommit/stepPush which are steps inside the full
 // autonomous tddWorkflow pipeline.
 
-export function gitCommitFiles(cwd: string, message: string, files: string[]): { ok: boolean; out: string } {
+/** Absolute git toplevel containing `path` — the linked worktree's own root when
+ *  the path lives in one — or null if it isn't inside a repo at all. */
+export function gitToplevel(path: string): string | null {
+  const dir = existsSync(path) && statSync(path).isDirectory() ? path : dirname(path);
+  if (!existsSync(dir)) return null;
+  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  return r.stdout.trim() || null;
+}
+
+export function currentBranch(cwd: string): string | null {
+  const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8' });
+  return r.status === 0 ? (r.stdout.trim() || null) : null;
+}
+
+/**
+ * Decide which checkout a commit of `files` belongs to, by asking git about the
+ * files themselves rather than trusting the caller's cwd. A worktree created by
+ * createTaskWorktree is a sibling directory, so committing its files from the
+ * primary checkout used to fail with "outside repository" — resolving from the
+ * paths makes crux_git_commit work whether or not a task slug was passed.
+ * Files spanning two worktrees are refused outright: git would stage part of the
+ * set and then fail, leaving the caller with a half-staged index.
+ */
+export function resolveCommitRoot(cwd: string, files: string[]): { ok: boolean; root: string; out: string } {
+  const byRoot = new Map<string, string[]>();
+  for (const f of files) {
+    const top = gitToplevel(isAbsolute(f) ? f : join(cwd, f));
+    if (!top) continue;
+    byRoot.set(top, [...(byRoot.get(top) ?? []), f]);
+  }
+  if (byRoot.size === 0) return { ok: true, root: cwd, out: '' };
+  if (byRoot.size > 1) {
+    const detail = [...byRoot.entries()].map(([root, fs]) => `  ${root}\n    ${fs.join('\n    ')}`).join('\n');
+    return {
+      ok: false, root: cwd,
+      out: `files span ${byRoot.size} different worktrees — commit each separately:\n${detail}`,
+    };
+  }
+  return { ok: true, root: [...byRoot.keys()][0], out: '' };
+}
+
+export function gitCommitFiles(
+  cwd: string, message: string, files: string[]
+): { ok: boolean; out: string; root?: string; branch?: string } {
   if (files.length === 0) return { ok: false, out: 'no files given — nothing to commit' };
+  const resolved = resolveCommitRoot(cwd, files);
+  if (!resolved.ok) return { ok: false, out: resolved.out };
+
+  const root = resolved.root;
   const noop = () => {};
-  const add = git(['add', ...files], cwd, noop);
-  if (!add.ok) return add;
-  return git(['commit', '-m', message], cwd, noop);
+  // Absolute paths throughout: `files` are relative to the caller's cwd, which
+  // is not necessarily the worktree we resolved to.
+  const abs = files.map(f => (isAbsolute(f) ? f : join(cwd, f)));
+
+  const add = git(['add', ...abs], root, noop);
+  if (!add.ok) return { ...add, root };
+  const commit = git(['commit', '-m', message], root, noop);
+  return { ...commit, root, branch: currentBranch(root) ?? undefined };
 }
 
 export function gitPushBranch(cwd: string, branch?: string): { ok: boolean; out: string } {
   const noop = () => {};
   const args = branch ? ['push', '-u', 'origin', branch] : ['push'];
   return git(args, cwd, noop);
+}
+
+/**
+ * Resolve which directory a git operation for this project should run in.
+ * If a slug is given and that task has an isolated worktree (see
+ * createTaskWorktree below), operate there — otherwise interactive tools like
+ * crux_git_commit/crux_git_push always resolve to the primary repo root and
+ * silently can't reach a task's isolated worktree at all (files/paths that
+ * only exist there get rejected by git as outside the repo). The autonomous
+ * runWorkflow engine doesn't need this — it threads ctx.cwd itself.
+ * Falls back to repoRoot when there's no slug, no matching task, or no worktree.
+ */
+export function resolveTaskCwd(db: DatabaseSync, projectId: string, repoRoot: string, slug?: string): string {
+  if (!slug) return repoRoot;
+  const task = taskBySlug(db, projectId, slug);
+  if (task?.worktree_path && existsSync(task.worktree_path)) return task.worktree_path;
+  return repoRoot;
+}
+
+/** The remote to sync against — `origin` when present, else the first one
+ *  configured, else null. Asked of git directly: a project can have a working
+ *  origin while its gh_repo column is null, so the DB is not a reliable source. */
+export function detectRemote(repoRoot: string): string | null {
+  const r = spawnSync('git', ['remote'], { cwd: repoRoot, encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  const remotes = r.stdout.split('\n').map(s => s.trim()).filter(Boolean);
+  if (remotes.length === 0) return null;
+  return remotes.includes('origin') ? 'origin' : remotes[0];
+}
+
+function refExists(repoRoot: string, ref: string): boolean {
+  return spawnSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd: repoRoot, encoding: 'utf8' }).status === 0;
+}
+
+/** Commits on `local` not on `remote`, and vice versa. Null when either ref is missing. */
+function aheadBehind(repoRoot: string, local: string, remote: string): { ahead: number; behind: number } | null {
+  const r = spawnSync('git', ['rev-list', '--left-right', '--count', `${local}...${remote}`], { cwd: repoRoot, encoding: 'utf8' });
+  if (r.status !== 0) return null;
+  const [ahead, behind] = r.stdout.trim().split(/\s+/).map(Number);
+  return Number.isFinite(ahead) && Number.isFinite(behind) ? { ahead, behind } : null;
+}
+
+export interface WorktreeResult {
+  ok: boolean;
+  out: string;
+  path?: string;
+  branch?: string;
+  remote?: string | null;
+  base?: string;              // commit sha the new branch starts at
+  base_ref?: string;          // what that sha was resolved from, e.g. 'origin/main'
+  reused_branch?: boolean;    // re-attached to an existing feat/<slug> branch
+  ahead?: number | null;      // local main vs remote main; null when there's no remote
+  behind?: number | null;
+}
+
+/**
+ * Creates an isolated git worktree + feat/<slug> branch for interactive task work,
+ * as a sibling directory of repoRoot — so a human or agent working on one task
+ * never collides with other in-flight work in the primary checkout.
+ *
+ * Fetches before branching so the branch starts from the current remote tip
+ * rather than whatever the local clone last saw — a stale base only surfaces
+ * later, as a needless conflict at PR time. Local commits are never discarded:
+ * if local main is ahead of, or diverged from, the remote, the branch is based
+ * on local main and the ahead/behind counts are reported so the caller can see
+ * what it got. A repo with no remote branches locally rather than failing.
+ */
+export function createTaskWorktree(repoRoot: string, slug: string): WorktreeResult {
+  const noop = () => {};
+  const branch = `feat/${slug}`;
+  const worktreePath = join(dirname(repoRoot), `${basename(repoRoot)}-${slug}`);
+
+  if (existsSync(worktreePath)) {
+    return { ok: false, out: `Worktree path already exists: ${worktreePath}` };
+  }
+
+  const remote = detectRemote(repoRoot);
+  const localRef = refExists(repoRoot, 'main') ? 'main' : 'HEAD';
+  let baseRef = localRef;
+  let counts: { ahead: number; behind: number } | null = null;
+
+  if (remote) {
+    // Update the remote-tracking ref only — never the local branch, which may
+    // hold unpushed commits. Forced because a tracking ref is a mirror of the
+    // remote and may legitimately be rewritten there.
+    const remoteMain = `refs/remotes/${remote}/main`;
+    const fetch = git(['fetch', remote, `+main:${remoteMain}`], repoRoot, noop);
+    if (!fetch.ok) return { ok: false, out: `Failed to fetch ${remote}: ${fetch.out}`, remote };
+
+    counts = aheadBehind(repoRoot, localRef, remoteMain);
+    // Strictly behind → the remote tip is what we want. Ahead or diverged →
+    // stay local so unpushed work is carried into the worktree, not dropped.
+    if (counts && counts.behind > 0 && counts.ahead === 0) baseRef = `${remote}/main`;
+  }
+
+  // Drop admin entries for worktrees whose directory was deleted by hand —
+  // otherwise git still considers the path registered and refuses to re-add it.
+  git(['worktree', 'prune'], repoRoot, noop);
+
+  // The branch outlives the directory. Re-attach to it rather than passing -b
+  // (which fails when it exists) or -B (which would reset it, discarding any
+  // commits made before the directory was removed).
+  const branchExists = refExists(repoRoot, `refs/heads/${branch}`);
+  const add = branchExists
+    ? git(['worktree', 'add', worktreePath, branch], repoRoot, noop)
+    : git(['worktree', 'add', worktreePath, '-b', branch, baseRef], repoRoot, noop);
+  if (!add.ok) return { ok: false, out: add.out, remote };
+
+  const base = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath, encoding: 'utf8' }).stdout.trim();
+  return {
+    ok: true, out: add.out, path: worktreePath, branch,
+    remote, base, base_ref: branchExists ? branch : baseRef, reused_branch: branchExists,
+    ahead: counts ? counts.ahead : null,
+    behind: counts ? counts.behind : null,
+  };
 }
 
 function run(cmd: string, cwd: string, log: (s: string) => void): { ok: boolean; out: string } {
@@ -152,7 +325,7 @@ async function llmCall(
 
 // ── Shared system prompt ──────────────────────────────────────────────────────
 
-function baseSystemPrompt(task: Task, proj: Project, db: DatabaseSync, resuming = false): string {
+function baseSystemPrompt(task: Task, proj: Project, db: DatabaseSync, cwd: string, resuming = false): string {
   const adrs     = listAdrs(db, proj.id).slice(0, 3);
   const tasks    = tasksByProject(db, proj.id);
   const deps     = dependenciesByProject(db, proj.id);
@@ -165,7 +338,6 @@ function baseSystemPrompt(task: Task, proj: Project, db: DatabaseSync, resuming 
     : '';
 
   const newFiles  = filesToCreate(task);
-  const cwd = process.cwd();
 
   // Inject heads of files_affected (existing files needing minor edits — imports, wiring)
   const fileContext = files.length
@@ -212,9 +384,25 @@ Respond with file contents only. First line of each file: // path/to/file.ts`;
 // ── Step: create + checkout branch ───────────────────────────────────────────
 
 function stepBranch(ctx: StepContext): boolean {
-  const { branch, log } = ctx;
-  const cwd = process.cwd();
+  const { branch, log, cwd, usingWorktree } = ctx;
 
+  // In a worktree, createTaskWorktree() already created + checked out the
+  // branch (from up-to-date main) when the worktree itself was created — just
+  // confirm we're on it rather than redoing checkout logic in-place, which
+  // would touch the shared primary checkout other tasks may be using.
+  if (usingWorktree) {
+    const current = git(['branch', '--show-current'], cwd, log);
+    if (current.out.trim() === branch) {
+      log(`  [branch] worktree already on ${branch}`);
+      return true;
+    }
+    log(`  [branch] worktree not on expected branch (found "${current.out.trim()}") — checking out ${branch}`);
+    const co = git(['checkout', branch], cwd, log);
+    return co.ok;
+  }
+
+  // No worktree (creation failed, or an older task predating this feature
+  // with no worktree_path) — fall back to in-place checkout as before.
   // Resuming a task already in progress — check out its existing branch as-is.
   // Do NOT sync main here: this branch may already have diverged from main
   // by design (partial prior work), and that's fine.
@@ -239,10 +427,68 @@ function stepBranch(ctx: StepContext): boolean {
 
 // ── Step: commit staged changes ───────────────────────────────────────────────
 
+/** Repo-relative paths with uncommitted changes, including untracked files. */
+export function dirtyPaths(cwd: string): string[] {
+  const r = spawnSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' });
+  if (r.status !== 0) return [];
+  return r.stdout.split('\n').filter(Boolean).map(line => {
+    const entry = line.slice(3);
+    const renamed = entry.indexOf(' -> ');           // "R  old -> new"
+    const path = renamed >= 0 ? entry.slice(renamed + 4) : entry;
+    return path.replace(/^"|"$/g, '');               // git quotes paths with odd chars
+  });
+}
+
+/**
+ * Decide whether the autonomous engine is allowed to make this commit.
+ *
+ * Two failures observed in GSSK on 2026-08-02, both of which committed work the
+ * engine did not author:
+ *  - it committed a working tree another session had left dirty, under its own
+ *    message. Only files the run itself wrote may be committed, so a file that
+ *    was ALREADY modified when the run started is refused rather than swept up.
+ *  - it committed one task's changes onto another task's branch. The branch is
+ *    resolved from the task being worked, so a checkout sitting on a sibling
+ *    task's branch is refused rather than written to.
+ *
+ * Pure so both rules are testable without driving a full workflow run.
+ */
+export function commitGuard(opts: {
+  branch: string;
+  currentBranch: string | null;
+  preexistingDirty: string[];
+  files: string[];
+}): { ok: boolean; reason?: string } {
+  const { branch, currentBranch, preexistingDirty, files } = opts;
+
+  if (currentBranch && currentBranch !== branch) {
+    return {
+      ok: false,
+      reason: `refusing to commit: checkout is on "${currentBranch}" but this task's branch is "${branch}" — `
+            + `committing here would put this task's changes on another task's branch`,
+    };
+  }
+
+  const dirty = new Set(preexistingDirty);
+  const foreign = files.filter(f => dirty.has(f));
+  if (foreign.length > 0) {
+    return {
+      ok: false,
+      reason: `refusing to commit: ${foreign.length} file(s) were already modified before this run started `
+            + `and may belong to another session — commit, stash or revert them first:\n  ${foreign.join('\n  ')}`,
+    };
+  }
+
+  return { ok: true };
+}
+
 function stepCommit(ctx: StepContext, message: string, files: string[]): boolean {
-  const { log } = ctx;
-  const cwd = process.cwd();
+  const { log, cwd, branch, preexistingDirty } = ctx;
   if (files.length === 0) { log('  [commit] nothing to commit'); return true; }
+
+  const guard = commitGuard({ branch, currentBranch: currentBranch(cwd), preexistingDirty, files });
+  if (!guard.ok) { log(`  [commit] ${guard.reason}`); return false; }
+
   const add = git(['add', ...files], cwd, log);
   if (!add.ok) return false;
   const commit = git(['commit', '-m', message], cwd, log);
@@ -267,7 +513,7 @@ function filterTscOutput(raw: string): string {
 }
 
 function stepRunTests(ctx: StepContext): { ok: boolean; output: string } {
-  const { log, proj, containerName } = ctx;
+  const { log, proj, containerName, cwd, usingWorktree } = ctx;
   const cmd = proj.test_cmd ?? (proj.run_env === 'shell' ? 'make test-ci 2>&1' : null);
   if (!cmd) {
     if (proj.run_env === 'container') {
@@ -277,8 +523,11 @@ function stepRunTests(ctx: StepContext): { ok: boolean; output: string } {
     log('  [test] no test_cmd — skipped');
     return { ok: true, output: '(skipped: no test_cmd)' };
   }
+  if (usingWorktree && containerName) {
+    log('  [test] WARNING: containerName is set but its volume mount is fixed to the primary checkout at session-start — this runs against that mount, not the isolated worktree (see p18-worktree-task-isolation follow-up)');
+  }
   log(`  [test] ${cmd}...`);
-  const r = runInEnv(cmd, process.cwd(), containerName, log);
+  const r = runInEnv(cmd, cwd, containerName, log);
   log(`  [test] ${r.ok ? 'PASS' : 'FAIL'}`);
   return { ok: r.ok, output: filterTestOutput(r.out).slice(0, 2000) };
 }
@@ -286,7 +535,7 @@ function stepRunTests(ctx: StepContext): { ok: boolean; output: string } {
 // ── Step: tsc check ───────────────────────────────────────────────────────────
 
 function stepTsc(ctx: StepContext): { ok: boolean; output: string } {
-  const { log, proj, containerName } = ctx;
+  const { log, proj, containerName, cwd, usingWorktree } = ctx;
   const cmd = proj.verify_cmd ?? (proj.run_env === 'shell' ? 'make typecheck 2>&1' : null);
   if (!cmd) {
     if (proj.run_env === 'container') {
@@ -296,8 +545,11 @@ function stepTsc(ctx: StepContext): { ok: boolean; output: string } {
     log('  [tsc] no verify_cmd — skipped');
     return { ok: true, output: '(skipped: no verify_cmd)' };
   }
+  if (usingWorktree && containerName) {
+    log('  [tsc] WARNING: containerName is set but its volume mount is fixed to the primary checkout at session-start — this runs against that mount, not the isolated worktree (see p18-worktree-task-isolation follow-up)');
+  }
   log(`  [tsc] ${cmd}...`);
-  const r = runInEnv(cmd, process.cwd(), containerName, log);
+  const r = runInEnv(cmd, cwd, containerName, log);
   log(`  [tsc] ${r.ok ? 'OK' : 'errors'}`);
   return { ok: r.ok, output: filterTscOutput(r.out).slice(0, 2000) };
 }
@@ -305,8 +557,8 @@ function stepTsc(ctx: StepContext): { ok: boolean; output: string } {
 // ── Step: push branch ─────────────────────────────────────────────────────────
 
 function stepPush(ctx: StepContext): boolean {
-  const { branch, log } = ctx;
-  const r = git(['push', '-u', 'origin', branch], process.cwd(), log);
+  const { branch, log, cwd } = ctx;
+  const r = git(['push', '-u', 'origin', branch], cwd, log);
   if (r.ok) log(`  [push] pushed ${branch}`);
   return r.ok;
 }
@@ -346,10 +598,10 @@ export function checksConclusion(runs: CheckRun[]): 'pending' | 'success' | 'fai
 }
 
 function stepWaitForChecks(ctx: StepContext, maxAttempts = 8, intervalSeconds = 15): { outcome: 'success' | 'failure' | 'none'; output: string } {
-  const { log, proj } = ctx;
+  const { log, proj, cwd } = ctx;
   if (!proj.gh_repo) return { outcome: 'none', output: '(no gh_repo configured)' };
 
-  const shaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
+  const shaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' });
   const sha = shaResult.stdout?.trim();
   if (!sha) return { outcome: 'none', output: '(could not resolve HEAD sha)' };
 
@@ -376,9 +628,9 @@ function stepWaitForChecks(ctx: StepContext, maxAttempts = 8, intervalSeconds = 
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function tddWorkflow(ctx: StepContext): Promise<WorkflowResult> {
-  const { task, proj, db, log, llm } = ctx;
+  const { task, proj, db, log, llm, cwd } = ctx;
   const resuming = task.status === 'in-progress';
-  const sys = baseSystemPrompt(task, proj, db, resuming);
+  const sys = baseSystemPrompt(task, proj, db, cwd, resuming);
 
   // 1. Branch
   log('\n[step 1/9] create branch');
@@ -386,7 +638,7 @@ async function tddWorkflow(ctx: StepContext): Promise<WorkflowResult> {
 
   // 2. LLM: write tests
   log('\n[step 2/9] LLM: write tests');
-  const testPattern = readTestPattern(process.cwd());
+  const testPattern = readTestPattern(cwd);
   const testPrompt = `Write failing tests for: ${task.slug} — ${task.title}
 
 Acceptance criteria (what the tests must verify):
@@ -415,8 +667,8 @@ Rules:
   const testPathMatch = testCode.match(/\/\/\s*(test\/[\w\-/.]+\.ts)/);
   const testPath = testPathMatch ? testPathMatch[1] : `test/${task.slug}.test.ts`;
   const testContent = testCode.replace(/^\/\/\s*test\/[\w\-/.]+\.ts\n/, '');
-  run(`mkdir -p $(dirname ${testPath})`, process.cwd(), log);
-  run(`cat > ${testPath} << 'CRUX_EOF'\n${testContent}\nCRUX_EOF`, process.cwd(), log);
+  run(`mkdir -p $(dirname ${testPath})`, cwd, log);
+  run(`cat > ${testPath} << 'CRUX_EOF'\n${testContent}\nCRUX_EOF`, cwd, log);
   log(`  [write] ${testPath}`);
 
   // 3. Commit tests
@@ -455,7 +707,6 @@ Output each file in full. First line of each file: // path/to/file.ts`;
   // Never overwrite an existing file unless it's explicitly in files_affected.
   const allowedNew = new Set(newFiles.map(f => f.path));
   const allowedEdit = new Set(affectedFiles(task));
-  const cwd = process.cwd();
 
   const implFiles: string[] = [];
   const fileBlocks = implCode.split(/(?=^\/\/ \S)/m).filter(b => b.trim());
@@ -504,7 +755,7 @@ Output each file in full. First line of each file: // path/to/file.ts`;
       const pm = block.match(/^\/\/ ([\w\-/.]+\.[a-z]+)/m);
       if (!pm) continue;
       const content = block.replace(/^\/\/ [\w\-/.]+\.[a-z]+\n/, '');
-      run(`cat > ${pm[1]} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, process.cwd(), log);
+      run(`cat > ${pm[1]} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, cwd, log);
       fixedFiles.push(pm[1]);
     }
     stepCommit(ctx, `fix(${task.slug}): tsc errors attempt ${attempt}`, fixedFiles);
@@ -527,7 +778,7 @@ Output each file in full. First line of each file: // path/to/file.ts`;
       const pm = block.match(/^\/\/ ([\w\-/.]+\.[a-z]+)/m);
       if (!pm) continue;
       const content = block.replace(/^\/\/ [\w\-/.]+\.[a-z]+\n/, '');
-      run(`cat > ${pm[1]} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, process.cwd(), log);
+      run(`cat > ${pm[1]} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, cwd, log);
       fixedFiles.push(pm[1]);
     }
     stepCommit(ctx, `fix(${task.slug}): test failures attempt ${attempt}`, fixedFiles);
@@ -563,8 +814,8 @@ Output each file in full. First line of each file: // path/to/file.ts`;
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function writingWorkflow(ctx: StepContext): Promise<WorkflowResult> {
-  const { task, proj, db, log, llm } = ctx;
-  const sys = baseSystemPrompt(task, proj, db, task.status === 'in-progress');
+  const { task, proj, db, log, llm, cwd } = ctx;
+  const sys = baseSystemPrompt(task, proj, db, cwd, task.status === 'in-progress');
 
   log('\n[step 1/4] create branch');
   if (!stepBranch(ctx)) return { completed: false, blocked: true, step: 'branch', note: 'git branch failed' };
@@ -581,8 +832,8 @@ Output the document content only. First line: // docs/PATH.md`;
   const pathMatch = draft.match(/^\/\/ (docs\/[\w\-/.]+\.md)/m);
   const docPath   = pathMatch ? pathMatch[1] : `docs/${task.slug}.md`;
   const content   = draft.replace(/^\/\/ docs\/[\w\-/.]+\.md\n/, '');
-  run(`mkdir -p $(dirname ${docPath})`, process.cwd(), log);
-  run(`cat > ${docPath} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, process.cwd(), log);
+  run(`mkdir -p $(dirname ${docPath})`, cwd, log);
+  run(`cat > ${docPath} << 'CRUX_EOF'\n${content}\nCRUX_EOF`, cwd, log);
   log(`  [write] ${docPath}`);
 
   log('\n[step 3/4] commit + push');
@@ -602,8 +853,8 @@ Output the document content only. First line: // docs/PATH.md`;
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function researchWorkflow(ctx: StepContext): Promise<WorkflowResult> {
-  const { task, proj, db, log, llm } = ctx;
-  const sys = baseSystemPrompt(task, proj, db, task.status === 'in-progress');
+  const { task, proj, db, log, llm, cwd } = ctx;
+  const sys = baseSystemPrompt(task, proj, db, cwd, task.status === 'in-progress');
 
   log('\n[step 1/3] create branch');
   if (!stepBranch(ctx)) return { completed: false, blocked: true, step: 'branch', note: 'git branch failed' };
@@ -619,8 +870,8 @@ Output JSON only:
   if (!adrJson) return { completed: false, blocked: true, step: 'research', note: 'LLM unavailable' };
 
   const docPath = `docs/adr/${task.slug}.md`;
-  run(`mkdir -p docs/adr`, process.cwd(), log);
-  run(`cat > ${docPath} << 'CRUX_EOF'\n# ADR: ${task.title}\n\n${adrJson}\nCRUX_EOF`, process.cwd(), log);
+  run(`mkdir -p docs/adr`, cwd, log);
+  run(`cat > ${docPath} << 'CRUX_EOF'\n# ADR: ${task.title}\n\n${adrJson}\nCRUX_EOF`, cwd, log);
 
   log('\n[step 3/3] commit + push + done');
   stepCommit(ctx, `research(${task.slug}): ADR draft`, [docPath]);
@@ -676,17 +927,49 @@ export async function runWorkflow(
   const sess = activeSession(db, proj.id);
   const containerName = sess?.container_name ?? null;
 
+  const resuming = task.status === 'in-progress';
+  const executor = task.executor ?? 'auto';
+
+  // Isolate this task's checkout in a sibling git worktree so it never collides
+  // with another in-flight task's uncommitted state in the primary checkout —
+  // reuse an existing worktree when resuming, create one for new non-human tasks,
+  // fall back to the primary checkout (old in-place behavior) if that fails.
+  const repoRoot = proj.repo_path ?? findRepoRoot() ?? process.cwd();
+  let cwd = repoRoot;
+  let usingWorktree = false;
+
+  if (executor !== 'human') {
+    if (task.worktree_path && existsSync(task.worktree_path)) {
+      cwd = task.worktree_path;
+      usingWorktree = true;
+    } else if (!resuming) {
+      const wt = createTaskWorktree(repoRoot, task.slug);
+      if (wt.ok && wt.path) {
+        cwd = wt.path;
+        usingWorktree = true;
+        updateTaskWorktreePath(db, task.id, wt.path);
+      } else {
+        log(`  [workflow] worktree creation failed (${wt.out}) — falling back to in-place checkout in ${repoRoot}`);
+      }
+    }
+  }
+
+  // Snapshot dirty state BEFORE any step writes anything — everything listed
+  // here belongs to someone else, and must not end up in this run's commits.
+  const preexistingDirty = dirtyPaths(cwd);
+
   const ctx: StepContext = {
-    db, proj, task, branch, log,
+    db, proj, task, branch, cwd, usingWorktree, log, preexistingDirty,
     llm: { endpoint, model, ctxTokens: opts.ctxTokens ?? 6000 },
     containerName,
   };
 
-  const resuming = task.status === 'in-progress';
-  const executor = task.executor ?? 'auto';
-
   log(`\ncrux workflow → ${task.slug} [${task.task_type}] executor:${executor}${resuming ? ' (RESUMING)' : ''}`);
   log(`branch: ${branch}`);
+  log(`cwd:    ${cwd}${usingWorktree ? ' (isolated worktree)' : ''}`);
+  if (preexistingDirty.length > 0) {
+    log(`dirty:  ${preexistingDirty.length} pre-existing modified path(s) — excluded from this run's commits`);
+  }
   log(`model:  ${model}\n`);
 
   // ── Human tasks: skip entirely, surface in human_queue ────────────────────

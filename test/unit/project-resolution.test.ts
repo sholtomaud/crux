@@ -13,8 +13,8 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { insertProject, setActiveProjectId } from '../../lib/db.ts';
-import { resolveActiveProject } from '../../lib/project-resolution.ts';
+import { insertProject, setActiveProjectId, readProjectPointer } from '../../lib/db.ts';
+import { resolveActiveProject, relinkCwdIfLinked } from '../../lib/project-resolution.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -69,5 +69,42 @@ describe('resolveActiveProject', () => {
     const db = makeDb();
     const resolved = resolveActiveProject(db, null);
     assert.equal(resolved, null);
+  });
+});
+
+describe('relinkCwdIfLinked', () => {
+  // Regression test for switch-ignored-by-task-writes: crux_switch reported
+  // success but subsequent tool calls still targeted the cwd's originally-linked
+  // project, because a CWD link always wins over the global active_project_id
+  // fallback and crux_switch never updated it.
+  test('re-points an existing CWD link to the new target and reports true', () => {
+    const db = makeDb();
+    const projOld = insertProject(db, { name: 'old-project', type: 'code_repo' });
+    const projNew = insertProject(db, { name: 'new-project', type: 'code_repo' });
+    const dir = makeLinkedRepoDir(projOld.id);
+
+    const relinked = relinkCwdIfLinked(dir, projNew.id);
+
+    assert.equal(relinked, true);
+    assert.equal(readProjectPointer(dir), projNew.id);
+    // The actual bug: after "switching," resolution for this cwd must now
+    // reach the new project, not silently keep resolving to the old one.
+    assert.equal(resolveActiveProject(db, dir)?.id, projNew.id);
+  });
+
+  test('does nothing and returns false when the cwd has no link', () => {
+    const db = makeDb();
+    const proj = insertProject(db, { name: 'target', type: 'code_repo' });
+    const dir = mkdtempSync(join(tmpdir(), 'crux-resolution-test-'));
+
+    const relinked = relinkCwdIfLinked(dir, proj.id);
+
+    assert.equal(relinked, false);
+    assert.equal(readProjectPointer(dir), null);
+  });
+
+  test('does nothing and returns false when cwdRoot is null', () => {
+    const relinked = relinkCwdIfLinked(null, 'any-id');
+    assert.equal(relinked, false);
   });
 });

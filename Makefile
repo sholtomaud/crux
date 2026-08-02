@@ -13,24 +13,33 @@ NODE_MACOS_URL := https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)
 NODE_MACOS_BIN := dist/node-macos-arm64
 
 RUN := $(CONTAINER_BIN) run -it --rm \
-	-v "$(PWD):$(WORKDIR)" \
+	-v "$(CURDIR):$(WORKDIR)" \
 	-v node_modules_cache:$(WORKDIR)/node_modules \
 	-p 5173:5173 \
 	-p 8765:8765 \
 	$(IMAGE_APP)
 
 # Non-interactive variant (no -t) for CI and agent use
-# GH_TOKEN injected at runtime so gh CLI works inside the container without keychain
+# GH_TOKEN is injected at runtime so the gh CLI works inside the container
+# without keychain access. It is passed by NAME (`-e GH_TOKEN`, which inherits
+# from the host env) and never by value: interpolating the token into the
+# recipe text would print it to stdout every time make echoes the line —
+# leaking a live credential into terminals, CI logs and agent transcripts.
+# (two lines, not `export GH_TOKEN ?= ...` — GNU make 3.81, the macOS system
+# make, cannot parse `export` combined with a conditional assignment.)
+GH_TOKEN ?= $(shell gh auth token 2>/dev/null)
+export GH_TOKEN
+
 RUN_CI := $(CONTAINER_BIN) run -i --rm \
-	-v "$(PWD):$(WORKDIR)" \
+	-v "$(CURDIR):$(WORKDIR)" \
 	-v node_modules_cache:$(WORKDIR)/node_modules \
-	-e GH_TOKEN=$(shell gh auth token 2>/dev/null) \
+	-e GH_TOKEN \
 	$(IMAGE_APP)
 
 # High-memory variant for SEA builds (postject WASM is memory-hungry)
 RUN_BIG := $(CONTAINER_BIN) run -i --rm \
 	--memory 2g \
-	-v "$(PWD):$(WORKDIR)" \
+	-v "$(CURDIR):$(WORKDIR)" \
 	-v node_modules_cache:$(WORKDIR)/node_modules \
 	$(IMAGE_APP)
 
@@ -104,15 +113,15 @@ bootstrap: image ensure-deps ## First-time project setup
 # App Lifecycle (mirrors package.json)
 # --------------------------------------------------
 
-dev: ensure-deps ## Start Vite dev server
+dev: ensure-deps ## Start UI dev server (reads ui/*.html live from disk, no bundling)
 	@echo "🚀 Starting dev server..."
 	$(RUN) npm run dev
 
-build: start ensure-deps ## Production build
+build: start ensure-deps ## Production build (bundle TS -> dist/crux.cjs)
 	@echo "🏗️ Building application..."
 	$(RUN) npm run build
 
-preview: ensure-deps ## Preview production build
+preview: build ## Preview production build (runs the just-built dist/crux.cjs)
 	@echo "👀 Preview build..."
 	$(RUN) npm run preview
 
@@ -224,7 +233,7 @@ test-e2e: ## Build e2e image and run Playwright PWA tests (requires crux ui runn
 	@echo "🎭 Running Playwright e2e tests..."
 	$(CONTAINER_BIN) run -i --rm \
 		--network host \
-		-v "$(PWD):$(WORKDIR)" \
+		-v "$(CURDIR):$(WORKDIR)" \
 		$(IMAGE_E2E)
 
 # --------------------------------------------------

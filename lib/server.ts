@@ -23,7 +23,7 @@ import http from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   openDb, allProjects, tasksByProject, dependenciesByProject,
-  roiSummary, totalHours, projectStatus,
+  roiSummary, totalHours, projectStatus, firstRevenueAt,
   taskBySlug, updateTaskStatus, projectById, updateProjectStatus, logAudit,
   activeSession, startSession, endSession,
   TASK_STATUSES, PROJECT_STATUSES,
@@ -66,7 +66,8 @@ function apiOverview(db: DatabaseSync, res: http.ServerResponse): void {
     const tasks = tasksByProject(db, p.id);
     const roi   = roiSummary(db, p.id);
     const hours = totalHours(db, p.id);
-    return { ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours };
+    const nextTask = projectStatus(db, p.id).next_unblocked[0] ?? null;
+    return { ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours, next_task: nextTask, first_revenue_at: firstRevenueAt(db, p.id) };
   });
   json(res, data);
 }

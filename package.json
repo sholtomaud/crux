@@ -12,7 +12,10 @@
     "lint": "node --check index.ts lib/**/*.ts",
     "typecheck": "tsgo --noEmit",
     "format": "echo 'no formatter configured'",
-    "bundle": "node esbuild.config.mjs"
+    "bundle": "node esbuild.config.mjs",
+    "dev": "node index.ts ui --no-open",
+    "build": "npm run bundle",
+    "preview": "node dist/crux.cjs ui --no-open"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
