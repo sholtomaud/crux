@@ -1,0 +1,38 @@
+name: CI
+
+# The Makefile wraps everything in a container because there is no expectation
+# of a host-installed Node. Actions gives us Node directly, so this calls the
+# npm scripts the Makefile targets wrap, rather than the targets themselves.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: unit tests + typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node >= 25 (package.json engines): the test script runs .ts files
+      # directly under node --test, with no transpile step anywhere.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25.x
+          cache: npm
+
+      - run: npm ci
+
+      # Unit tests only. test:agent drives the real gh CLI / GitHub API and
+      # does not belong in a PR gate.
+      - run: npm test
+
+      - run: npm run typecheck
