@@ -18,7 +18,7 @@
     "preview": "node dist/crux.cjs ui --no-open"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
