@@ -1,6 +1,6 @@
 # ADR-009: Drop @modelcontextprotocol/sdk for a hand-rolled stdio server
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-08-02
 
 ## Context
@@ -31,17 +31,26 @@ framework-free UI (ADR-005), a zero-install SEA binary (ADR-001).
 
 ## Decision
 
-Proposed, not yet accepted — this ADR records the trade-off; the
-implementation is tracked separately as task `mcp-sdk-drop-vanilla-stdio`.
-
 Replace the SDK with a hand-rolled MCP stdio server. MCP over stdio is
 newline-delimited JSON-RPC 2.0 on stdin/stdout, and crux needs four
 methods: `initialize`, `notifications/initialized`, `tools/list`,
-`tools/call`. Tool schemas go on the wire as JSON Schema, which is what
-zod-to-json-schema produces today — so the 30 `server.tool()` registrations
-convert to literal JSON Schema objects, and the input validation zod
-currently provides for free is hand-written. Estimated ~150 lines of
-transport and dispatch plus a mechanical schema conversion.
+`tools/call`.
+
+Tool schemas go on the wire as JSON Schema, which is what
+zod-to-json-schema produces today. Rather than transcribe 30
+`server.tool()` registrations into literal JSON Schema objects by hand —
+roughly 200 fields, each an opportunity for a silent typo that only
+surfaces as a client-side validation failure — `lib/mcp/schema.ts`
+provides a small builder covering exactly the subset of the zod API those
+registrations use (`string`, `number`, `boolean`, `enum`, `array`,
+`object`, plus `optional`, `describe`, `min`, `max`). It emits JSON Schema
+and validates input. The registrations keep their existing shape, so the
+cutover diff is an import line rather than 30 rewritten schemas, and
+`git diff` stays reviewable.
+
+The builder is deliberately not a general-purpose validation library: it
+implements what crux's tool surface needs and should grow only when a tool
+needs something new.
 
 ## Consequences
 
