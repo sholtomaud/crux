@@ -226,6 +226,7 @@ export function startServer(port = readCruxConfig().ui_port, host = '127.0.0.1')
     if (path === '/roi' || path === '/roi.html') return serveAsset(res, '/roi.html');
     if (path.startsWith('/graph'))              return serveAsset(res, '/graph.html');
     if (path === '/db' || path === '/db.html')  return serveAsset(res, '/db.html');
+    if (path === '/tokens.css')                 return serveAsset(res, '/tokens.css');
     if (path === '/app.js')                     return serveAsset(res, '/app.js');
     if (path === '/sw.js')                      return serveAsset(res, '/sw.js');
     if (path === '/manifest.json')              return serveAsset(res, '/manifest.json');

@@ -17,6 +17,7 @@ export const UI_ASSETS: Record<string, { content: string; mime: string }> = {
   '/roi.html':      { content: readFileSync(join(UI_DIR, 'roi.html'),      'utf8'), mime: 'text/html; charset=utf-8' },
   '/graph.html':    { content: readFileSync(join(UI_DIR, 'graph.html'),    'utf8'), mime: 'text/html; charset=utf-8' },
   '/db.html':       { content: readFileSync(join(UI_DIR, 'db.html'),       'utf8'), mime: 'text/html; charset=utf-8' },
+  '/tokens.css':    { content: readFileSync(join(UI_DIR, 'tokens.css'),    'utf8'), mime: 'text/css; charset=utf-8' },
   '/app.js':        { content: readFileSync(join(UI_DIR, 'app.js'),        'utf8'), mime: 'application/javascript; charset=utf-8' },
   '/sw.js':         { content: readFileSync(join(UI_DIR, 'sw.js'),         'utf8'), mime: 'application/javascript; charset=utf-8' },
   '/manifest.json': { content: readFileSync(join(UI_DIR, 'manifest.json'), 'utf8'), mime: 'application/manifest+json; charset=utf-8' },

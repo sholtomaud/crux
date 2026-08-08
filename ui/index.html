@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f0f0f">
   <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/tokens.css">
   <title>crux — Portfolio</title>
   <style>
     .page-header { margin-bottom: var(--space-section-gap); }
@@ -13,7 +14,7 @@
 
     .metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: var(--space-section-gap); }
     .metric-card { display: flex; flex-direction: column; gap: 0.5rem; }
-    .metric-card.warn { border-color: #4a3a1a; background: #1a1608; }
+    .metric-card.warn { border-color: var(--color-warn-border); background: var(--color-warn-surface); }
     .metric-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-dim); display: flex; align-items: center; justify-content: space-between; }
     .metric-value { font-size: 1.5rem; font-weight: 700; color: var(--color-text-bright); }
     .metric-value.danger { color: var(--color-danger); }

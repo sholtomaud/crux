@@ -130,39 +130,12 @@ function renderAgentPanel() {
   document.body.appendChild(toggle);
 }
 
-// ── Design tokens + shared CSS injected once ────────────────────────────────────
+// ── Shared component CSS injected once ─────────────────────────────────────────
+// The palette itself lives in ui/tokens.css, linked by every page. Nothing here
+// may hardcode a colour — a literal hex is invisible to the theme switcher.
 (function injectSharedStyles() {
   const s = document.createElement('style');
   s.textContent = `
-    :root {
-      --color-bg: #0f0f0f;
-      --color-surface: #141414;
-      --color-surface-container: #1a1a1a;
-      --color-surface-container-high: #202020;
-      --color-surface-container-highest: #2a2a2a;
-      --color-border: #242424;
-      --color-border-strong: #333;
-      --color-text: #e0e0e0;
-      --color-text-bright: #fff;
-      --color-text-dim: #666;
-      --color-text-dimmer: #555;
-      --color-primary: #34d399;
-      --color-secondary: #60a5fa;
-      --color-danger: #f87171;
-      --color-warning: #f59e0b;
-      --color-executor-llm: #22d3ee;
-      --color-executor-human: #c084fc;
-      --color-executor-hybrid: #f472b6;
-      --color-executor-auto: #777;
-      --radius: 8px;
-      --radius-sm: 4px;
-      --space-card-padding: 0.85rem;
-      --space-section-gap: 1.5rem;
-      --space-gutter-md: 1.25rem;
-      --sidebar-width: 240px;
-      --agent-panel-width: 340px;
-    }
-
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { min-height: 100%; }
     body {
@@ -180,7 +153,7 @@ function renderAgentPanel() {
     /* ── Sidebar ── */
     #app-sidebar {
       grid-column: 1; grid-row: 1;
-      background: #131313; border-right: 1px solid var(--color-border);
+      background: var(--color-sidebar-bg); border-right: 1px solid var(--color-border);
       display: flex; flex-direction: column; overflow-y: auto;
     }
     .sidebar-brand { padding: 1.1rem 1.25rem 0.9rem; }
@@ -214,10 +187,10 @@ function renderAgentPanel() {
     .sidebar-loading { padding: 0.4rem 1.1rem; font-size: 0.78rem; color: var(--color-text-dimmer); }
     .btn-install {
       margin: 0.75rem; font-size: 0.75rem; font-family: inherit; cursor: pointer;
-      background: #1a3a2a; color: var(--color-primary); border: 1px solid var(--color-primary);
+      background: var(--color-success-surface); color: var(--color-primary); border: 1px solid var(--color-primary);
       padding: 0.4rem 0.85rem; border-radius: var(--radius-sm); transition: all 0.15s;
     }
-    .btn-install:hover { background: var(--color-primary); color: #000; }
+    .btn-install:hover { background: var(--color-primary); color: var(--color-on-primary); }
 
     /* ── Main content area (each page fills grid-column: 2) ── */
     #app-main { grid-column: 2; grid-row: 1; overflow-y: auto; padding: var(--space-gutter-md) 2rem; }
@@ -260,21 +233,21 @@ function renderAgentPanel() {
 
     /* ── Badges (status + executor) ── */
     .badge { font-size: 0.7rem; padding: 0.15em 0.5em; border-radius: var(--radius-sm); font-weight: 600; }
-    .badge-open       { background: #1e3a5f; color: var(--color-secondary); }
-    .badge-inprogress { background: #3a2e1a; color: var(--color-warning); }
-    .badge-blocked    { background: #3a1a1a; color: var(--color-danger); }
-    .badge-done       { background: #1a3a2a; color: var(--color-primary); }
-    .badge-dropped    { background: #2a2a2a; color: #888; }
-    .badge-llm        { background: #123a3a; color: var(--color-executor-llm); }
-    .badge-human      { background: #2a1a3a; color: var(--color-executor-human); }
-    .badge-hybrid     { background: #3a1a2e; color: var(--color-executor-hybrid); }
-    .badge-auto       { background: #242424; color: var(--color-executor-auto); }
+    .badge-open       { background: var(--color-info-surface); color: var(--color-secondary); }
+    .badge-inprogress { background: var(--color-warning-surface); color: var(--color-warning); }
+    .badge-blocked    { background: var(--color-danger-surface); color: var(--color-danger); }
+    .badge-done       { background: var(--color-success-surface); color: var(--color-primary); }
+    .badge-dropped    { background: var(--color-neutral-surface); color: var(--color-text-faint); }
+    .badge-llm        { background: var(--color-executor-llm-surface); color: var(--color-executor-llm); }
+    .badge-human      { background: var(--color-executor-human-surface); color: var(--color-executor-human); }
+    .badge-hybrid     { background: var(--color-executor-hybrid-surface); color: var(--color-executor-hybrid); }
+    .badge-auto       { background: var(--color-executor-auto-surface); color: var(--color-executor-auto); }
 
     /* ── Buttons / inputs (shared primitives) ── */
-    .filter-btn { font: inherit; font-size: 0.78rem; background: var(--color-surface-container); color: #aaa;
+    .filter-btn { font: inherit; font-size: 0.78rem; background: var(--color-surface-container); color: var(--color-text-subtle);
                   border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); padding: 0.35em 0.9em; cursor: pointer; }
     .filter-btn:hover { color: var(--color-text); background: var(--color-surface-container-high); }
-    .filter-btn.active { background: var(--color-surface-container-highest); color: var(--color-text-bright); border-color: #555; }
+    .filter-btn.active { background: var(--color-surface-container-highest); color: var(--color-text-bright); border-color: var(--color-text-dimmer); }
     .search-input, .status-select {
       font: inherit; font-size: 0.82rem; background: var(--color-surface-container); color: var(--color-text);
       border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); padding: 0.45em 0.8em;
@@ -283,8 +256,8 @@ function renderAgentPanel() {
 
     /* ── Tables (shared base) ── */
     table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    th { text-align: left; color: #888; font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--color-border); }
-    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #1e1e1e; }
+    th { text-align: left; color: var(--color-text-faint); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--color-border); }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--color-border-subtle); }
 
     /* ── Cards / stats / progress ── */
     .card { background: var(--color-surface-container); border: 1px solid var(--color-border);
@@ -292,7 +265,7 @@ function renderAgentPanel() {
     .stat { background: var(--color-surface-container); border-radius: var(--radius); padding: 0.75rem 1rem; }
     .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--color-text-bright); }
     .stat-label { font-size: 0.72rem; color: var(--color-text-dim); margin-top: 0.2rem; }
-    .progress-bar-wrap { background: #2a2a2a; border-radius: 3px; height: 4px; }
+    .progress-bar-wrap { background: var(--color-surface-container-highest); border-radius: 3px; height: 4px; }
     .progress-bar-fill { background: var(--color-primary); height: 100%; border-radius: 3px; transition: width 0.4s; }
     .loading { color: var(--color-text-dim); font-size: 0.85rem; padding: 2rem 0; }
     .error { color: var(--color-danger); font-size: 0.85rem; }
