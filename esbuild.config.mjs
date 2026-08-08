@@ -26,6 +26,7 @@ const inlineUiPlugin = {
         { key: '/graph.html',    path: 'ui/graph.html',    mime: 'text/html; charset=utf-8' },
         { key: '/db.html',       path: 'ui/db.html',       mime: 'text/html; charset=utf-8' },
         { key: '/tokens.css',    path: 'ui/tokens.css',    mime: 'text/css; charset=utf-8' },
+        { key: '/theme.js',      path: 'ui/theme.js',      mime: 'application/javascript; charset=utf-8' },
         { key: '/app.js',        path: 'ui/app.js',        mime: 'application/javascript; charset=utf-8' },
         { key: '/sw.js',         path: 'ui/sw.js',         mime: 'application/javascript; charset=utf-8' },
         { key: '/manifest.json', path: 'ui/manifest.json', mime: 'application/manifest+json; charset=utf-8' },

@@ -2,8 +2,8 @@
 
 // Bumped to v3 when tokens.css was introduced — a stale v2 cache would serve
 // pages whose stylesheet link 404s, leaving the UI unstyled.
-const CACHE  = 'crux-v3';
-const STATIC = ['/', '/tokens.css', '/app.js', '/manifest.json', '/sw.js', '/icon.svg'];
+const CACHE  = 'crux-v4';
+const STATIC = ['/', '/tokens.css', '/theme.js', '/app.js', '/manifest.json', '/sw.js', '/icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(

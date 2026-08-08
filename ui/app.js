@@ -63,12 +63,17 @@ async function renderSidebar(activePage, activeProjectId = null) {
     </nav>
     <div class="sidebar-section-label">Active Projects</div>
     <nav class="sidebar-projects" id="sidebar-projects"><p class="sidebar-loading">Loading…</p></nav>
+    <div class="sidebar-footer" id="sidebar-footer"></div>
     <button id="btn-install" class="btn-install" hidden
       onclick="(async()=>{if(!_installPrompt)return;await _installPrompt.prompt();_installPrompt=null;this.hidden=true;})()">
       Install App
     </button>
   `;
   document.body.prepend(aside);
+
+  // theme.js owns the button so graph.html — which never loads app.js — can
+  // mount the identical control from its own nav.
+  window.cruxTheme?.mountToggle(document.getElementById('sidebar-footer'), 'theme-toggle');
 
   const listEl = document.getElementById('sidebar-projects');
   try {
@@ -185,6 +190,15 @@ function renderAgentPanel() {
     .sidebar-project-link:hover { color: var(--color-text); text-decoration: none; }
     .sidebar-project-link.active { color: var(--color-primary); border-left-color: var(--color-primary); }
     .sidebar-loading { padding: 0.4rem 1.1rem; font-size: 0.78rem; color: var(--color-text-dimmer); }
+    .sidebar-footer { padding: 0.6rem 0.6rem 0; }
+    .theme-toggle {
+      display: flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; cursor: pointer;
+      background: var(--color-surface-container); color: var(--color-text-dim);
+      border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
+    }
+    .theme-toggle:hover { color: var(--color-text); background: var(--color-surface-container-high); }
+
     .btn-install {
       margin: 0.75rem; font-size: 0.75rem; font-family: inherit; cursor: pointer;
       background: var(--color-success-surface); color: var(--color-primary); border: 1px solid var(--color-primary);

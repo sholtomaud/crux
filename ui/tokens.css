@@ -4,92 +4,101 @@
  * Loaded by every page, including graph.html, which is otherwise standalone and
  * used to carry its own private copy of these colours. Nothing outside this file
  * may declare a literal colour: a hex anywhere else is invisible to the theme
- * switcher and will silently stay dark when the light palette lands.
+ * switcher and would silently stay dark.
  *
- * Values here are the dark theme exactly as it was before tokenisation — this
- * file introduced no visual change, only the indirection that makes one
- * possible.
+ * ── How the three theme states resolve ────────────────────────────────────────
+ * The complete LIGHT palette is defined on bare :root, so every token always has
+ * a value no matter which media query or attribute matches. Dark is then applied
+ * twice, and both copies must stay identical:
+ *
+ *   1. @media (prefers-color-scheme: dark) + :root:not([data-theme="light"])
+ *      — the "system" default, which needs no JavaScript at all. The :not()
+ *        guard is what lets an explicit light choice beat a dark OS setting.
+ *   2. :root[data-theme="dark"]
+ *      — an explicit choice, which must beat a light OS setting.
+ *
+ * No token may have its only definition inside a media or [data-theme] block:
+ * that token would be undefined for half the users. test/unit/ui-tokens.test.ts
+ * enforces both that rule and the equality of the two dark blocks.
  */
 
 :root {
-  /* ── Surfaces ─────────────────────────────────────────────────────────── */
-  --color-bg:                        #0f0f0f;
-  --color-surface:                   #141414;
-  --color-surface-container:         #1a1a1a;
-  --color-surface-container-high:    #202020;
-  --color-surface-container-highest: #2a2a2a;
-  --color-sidebar-bg:                #131313;
+  /* Surfaces */
+  --color-bg:                           #faf9f8;
+  --color-surface:                      #ffffff;
+  --color-surface-container:            #f3f2f1;
+  --color-surface-container-high:       #edebe9;
+  --color-surface-container-highest:    #e1dfdd;
+  --color-sidebar-bg:                   #f3f2f1;
 
-  /* ── Borders ──────────────────────────────────────────────────────────── */
-  --color-border:        #242424;
-  --color-border-strong: #333;
-  --color-border-subtle: #1e1e1e;   /* table row rules, nav/panel dividers */
+  /* Borders */
+  --color-border:                       #e1dfdd;
+  --color-border-strong:                #c8c6c4;
+  --color-border-subtle:                #edebe9;  /* table row rules, nav/panel dividers */
 
-  /* ── Text, brightest to faintest ──────────────────────────────────────── */
-  --color-text:         #e0e0e0;
-  --color-text-bright:  #fff;
-  --color-text-muted:   #ccc;
-  --color-text-subtle:  #aaa;
-  --color-text-faint:   #888;
-  --color-text-dim:     #666;
-  --color-text-dimmer:  #555;
-  --color-text-faintest: #444;
-  --color-on-primary:   #000;       /* text on a filled primary button */
+  /* Text, brightest to faintest */
+  --color-text:                         #201f1e;
+  --color-text-bright:                  #000000;
+  --color-text-muted:                   #323130;
+  --color-text-subtle:                  #484644;
+  --color-text-faint:                   #57534e;
+  --color-text-dim:                     #605e5c;
+  --color-text-dimmer:                  #6e6c6a;
+  --color-text-faintest:                #767472;
+  --color-on-primary:                   #ffffff;  /* text on a filled primary button */
 
-  /* ── Accents ──────────────────────────────────────────────────────────── */
-  --color-primary:   #34d399;
-  --color-secondary: #60a5fa;
-  --color-danger:    #f87171;
-  --color-warning:   #f59e0b;
+  /* Accents */
+  --color-primary:                      #0b6a45;
+  --color-secondary:                    #0f548c;
+  --color-danger:                       #a4262c;
+  --color-warning:                      #8a6100;
 
-  /* ── Tonal status surfaces (badge and button backgrounds) ─────────────── */
-  --color-success-surface: #1a3a2a;
-  --color-success-border:  #2a5a3a;
-  --color-danger-surface:  #3a1a1a;
-  --color-danger-border:   #5a2a2a;
-  --color-warning-surface: #3a2e1a;
-  --color-info-surface:    #1e3a5f;
-  --color-neutral-surface: #2a2a2a;
-  /* The portfolio "spread" warning card — dimmer than a status badge. */
-  --color-warn-surface: #1a1608;
-  --color-warn-border:  #4a3a1a;
+  /* Tonal status surfaces (badge and button backgrounds) */
+  --color-success-surface:              #dff3e9;
+  --color-success-border:               #a9d9c3;
+  --color-danger-surface:               #fdeaec;
+  --color-danger-border:                #f0b8bd;
+  --color-warning-surface:              #fdf3d7;
+  --color-info-surface:                 #e5eff9;
+  --color-neutral-surface:              #ebeae9;
+  --color-warn-surface:                 #fff8e8;  /* portfolio spread-warning card */
+  --color-warn-border:                  #e8cf9a;
 
-  /* ── Executor identity ────────────────────────────────────────────────── */
-  --color-executor-llm:            #22d3ee;
-  --color-executor-human:          #c084fc;
-  --color-executor-hybrid:         #f472b6;
-  --color-executor-auto:           #777;
-  --color-executor-llm-surface:    #123a3a;
-  --color-executor-human-surface:  #2a1a3a;
-  --color-executor-hybrid-surface: #3a1a2e;
-  --color-executor-auto-surface:   #242424;
+  /* Executor identity */
+  --color-executor-llm:                 #0e6b7c;
+  --color-executor-human:               #6b2fb5;
+  --color-executor-hybrid:              #a4265f;
+  --color-executor-auto:                #605e5c;
+  --color-executor-llm-surface:         #dceff2;
+  --color-executor-human-surface:       #ece0fa;
+  --color-executor-hybrid-surface:      #fbe2ec;
+  --color-executor-auto-surface:        #ebeae9;
 
-  /* ── WSJF accent (purple, distinct from the status colours) ───────────── */
-  --color-wsjf:         #a78bfa;
-  --color-wsjf-surface: rgba(167, 139, 250, 0.12);
-  --color-wsjf-border:  rgba(167, 139, 250, 0.3);
+  /* WSJF accent (distinct from the status colours) */
+  --color-wsjf:                         #5b32b0;
+  --color-wsjf-surface:                 rgba(91, 50, 176, 0.10);
+  --color-wsjf-border:                  rgba(91, 50, 176, 0.28);
 
-  /* ── Dependency graph ─────────────────────────────────────────────────── */
-  /* The graph canvas sits darker than the app so nodes read as lit objects. */
-  --color-graph-canvas:         #0c0c0c;
-  --color-graph-control:        #1c1c1c;
-  --color-graph-control-hover:  #262626;
-  --color-graph-control-border-hover: #444;
-  --color-graph-node-fill:      #111122;
-  --color-graph-node-stroke:    #2a2a3a;
-  --color-graph-node-fill-crit: #2d1212;
-  --color-graph-edge:           #2e2e3e;
-  --color-graph-arrow:          #4a4a5a;
-  --color-graph-label:          #c4cde0;
-  --color-graph-label-crit:     #fca5a5;
-  --color-graph-meta:           #606070;
-  --color-graph-wsjf-chip:      #7c6aaa;
-  --color-graph-wsjf-chip-empty: #3a3a4a;
-  --color-graph-phase-chip:     #333348;
-  --color-graph-legend-fill:    #151528;
-  --color-graph-legend-border:  #334;
+  /* Dependency graph */
+  --color-graph-canvas:                 #f3f2f1;  /* sits off the page ground so nodes read as objects */
+  --color-graph-control:                #ffffff;
+  --color-graph-control-hover:          #f3f2f1;
+  --color-graph-control-border-hover:   #8a8886;
+  --color-graph-node-fill:              #ffffff;
+  --color-graph-node-stroke:            #c8c6c4;
+  --color-graph-node-fill-crit:         #fdeaec;
+  --color-graph-edge:                   #c8c6c4;
+  --color-graph-arrow:                  #8a8886;
+  --color-graph-label:                  #201f1e;
+  --color-graph-label-crit:             #a4262c;
+  --color-graph-meta:                   #605e5c;
+  --color-graph-wsjf-chip:              #5b32b0;
+  --color-graph-wsjf-chip-empty:        #767472;
+  --color-graph-phase-chip:             #767472;
+  --color-graph-legend-fill:            #eef0f8;
+  --color-graph-legend-border:          #b9c0e0;
 
-  /* ── Geometry and spacing ─────────────────────────────────────────────── */
+  /* Geometry and spacing — identical across themes */
   --radius:              8px;
   --radius-sm:           4px;
   --space-card-padding:  0.85rem;
@@ -97,4 +106,162 @@
   --space-gutter-md:     1.25rem;
   --sidebar-width:       240px;
   --agent-panel-width:   340px;
+}
+
+/* Dark, as the system preference. An explicit light choice wins over it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* Surfaces */
+    --color-bg:                           #0f0f0f;
+    --color-surface:                      #141414;
+    --color-surface-container:            #1a1a1a;
+    --color-surface-container-high:       #202020;
+    --color-surface-container-highest:    #2a2a2a;
+    --color-sidebar-bg:                   #131313;
+
+    /* Borders */
+    --color-border:                       #242424;
+    --color-border-strong:                #333333;
+    --color-border-subtle:                #1e1e1e;  /* table row rules, nav/panel dividers */
+
+    /* Text, brightest to faintest */
+    --color-text:                         #e0e0e0;
+    --color-text-bright:                  #ffffff;
+    --color-text-muted:                   #cccccc;
+    --color-text-subtle:                  #aaaaaa;
+    --color-text-faint:                   #888888;
+    --color-text-dim:                     #666666;
+    --color-text-dimmer:                  #555555;
+    --color-text-faintest:                #444444;
+    --color-on-primary:                   #000000;  /* text on a filled primary button */
+
+    /* Accents */
+    --color-primary:                      #34d399;
+    --color-secondary:                    #60a5fa;
+    --color-danger:                       #f87171;
+    --color-warning:                      #f59e0b;
+
+    /* Tonal status surfaces (badge and button backgrounds) */
+    --color-success-surface:              #1a3a2a;
+    --color-success-border:               #2a5a3a;
+    --color-danger-surface:               #3a1a1a;
+    --color-danger-border:                #5a2a2a;
+    --color-warning-surface:              #3a2e1a;
+    --color-info-surface:                 #1e3a5f;
+    --color-neutral-surface:              #2a2a2a;
+    --color-warn-surface:                 #1a1608;  /* portfolio spread-warning card */
+    --color-warn-border:                  #4a3a1a;
+
+    /* Executor identity */
+    --color-executor-llm:                 #22d3ee;
+    --color-executor-human:               #c084fc;
+    --color-executor-hybrid:              #f472b6;
+    --color-executor-auto:                #777777;
+    --color-executor-llm-surface:         #123a3a;
+    --color-executor-human-surface:       #2a1a3a;
+    --color-executor-hybrid-surface:      #3a1a2e;
+    --color-executor-auto-surface:        #242424;
+
+    /* WSJF accent (distinct from the status colours) */
+    --color-wsjf:                         #a78bfa;
+    --color-wsjf-surface:                 rgba(167, 139, 250, 0.12);
+    --color-wsjf-border:                  rgba(167, 139, 250, 0.3);
+
+    /* Dependency graph */
+    --color-graph-canvas:                 #0c0c0c;  /* sits off the page ground so nodes read as objects */
+    --color-graph-control:                #1c1c1c;
+    --color-graph-control-hover:          #262626;
+    --color-graph-control-border-hover:   #444444;
+    --color-graph-node-fill:              #111122;
+    --color-graph-node-stroke:            #2a2a3a;
+    --color-graph-node-fill-crit:         #2d1212;
+    --color-graph-edge:                   #2e2e3e;
+    --color-graph-arrow:                  #4a4a5a;
+    --color-graph-label:                  #c4cde0;
+    --color-graph-label-crit:             #fca5a5;
+    --color-graph-meta:                   #606070;
+    --color-graph-wsjf-chip:              #7c6aaa;
+    --color-graph-wsjf-chip-empty:        #3a3a4a;
+    --color-graph-phase-chip:             #333348;
+    --color-graph-legend-fill:            #151528;
+    --color-graph-legend-border:          #333344;
+  }
+}
+
+/* Dark, chosen explicitly. Wins over a light OS setting. */
+:root[data-theme="dark"] {
+    /* Surfaces */
+    --color-bg:                           #0f0f0f;
+    --color-surface:                      #141414;
+    --color-surface-container:            #1a1a1a;
+    --color-surface-container-high:       #202020;
+    --color-surface-container-highest:    #2a2a2a;
+    --color-sidebar-bg:                   #131313;
+
+    /* Borders */
+    --color-border:                       #242424;
+    --color-border-strong:                #333333;
+    --color-border-subtle:                #1e1e1e;  /* table row rules, nav/panel dividers */
+
+    /* Text, brightest to faintest */
+    --color-text:                         #e0e0e0;
+    --color-text-bright:                  #ffffff;
+    --color-text-muted:                   #cccccc;
+    --color-text-subtle:                  #aaaaaa;
+    --color-text-faint:                   #888888;
+    --color-text-dim:                     #666666;
+    --color-text-dimmer:                  #555555;
+    --color-text-faintest:                #444444;
+    --color-on-primary:                   #000000;  /* text on a filled primary button */
+
+    /* Accents */
+    --color-primary:                      #34d399;
+    --color-secondary:                    #60a5fa;
+    --color-danger:                       #f87171;
+    --color-warning:                      #f59e0b;
+
+    /* Tonal status surfaces (badge and button backgrounds) */
+    --color-success-surface:              #1a3a2a;
+    --color-success-border:               #2a5a3a;
+    --color-danger-surface:               #3a1a1a;
+    --color-danger-border:                #5a2a2a;
+    --color-warning-surface:              #3a2e1a;
+    --color-info-surface:                 #1e3a5f;
+    --color-neutral-surface:              #2a2a2a;
+    --color-warn-surface:                 #1a1608;  /* portfolio spread-warning card */
+    --color-warn-border:                  #4a3a1a;
+
+    /* Executor identity */
+    --color-executor-llm:                 #22d3ee;
+    --color-executor-human:               #c084fc;
+    --color-executor-hybrid:              #f472b6;
+    --color-executor-auto:                #777777;
+    --color-executor-llm-surface:         #123a3a;
+    --color-executor-human-surface:       #2a1a3a;
+    --color-executor-hybrid-surface:      #3a1a2e;
+    --color-executor-auto-surface:        #242424;
+
+    /* WSJF accent (distinct from the status colours) */
+    --color-wsjf:                         #a78bfa;
+    --color-wsjf-surface:                 rgba(167, 139, 250, 0.12);
+    --color-wsjf-border:                  rgba(167, 139, 250, 0.3);
+
+    /* Dependency graph */
+    --color-graph-canvas:                 #0c0c0c;  /* sits off the page ground so nodes read as objects */
+    --color-graph-control:                #1c1c1c;
+    --color-graph-control-hover:          #262626;
+    --color-graph-control-border-hover:   #444444;
+    --color-graph-node-fill:              #111122;
+    --color-graph-node-stroke:            #2a2a3a;
+    --color-graph-node-fill-crit:         #2d1212;
+    --color-graph-edge:                   #2e2e3e;
+    --color-graph-arrow:                  #4a4a5a;
+    --color-graph-label:                  #c4cde0;
+    --color-graph-label-crit:             #fca5a5;
+    --color-graph-meta:                   #606070;
+    --color-graph-wsjf-chip:              #7c6aaa;
+    --color-graph-wsjf-chip-empty:        #3a3a4a;
+    --color-graph-phase-chip:             #333348;
+    --color-graph-legend-fill:            #151528;
+    --color-graph-legend-border:          #333344;
 }

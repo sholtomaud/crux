@@ -7,11 +7,21 @@
   <link rel="manifest" href="/manifest.json">
   <title>crux — CPM Graph</title>
   <link rel="stylesheet" href="/tokens.css">
+  <script src="/theme.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, monospace; background: var(--color-bg); color: var(--color-text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
-    nav { padding: 0.6rem 1.2rem; border-bottom: 1px solid var(--color-border-subtle); flex-shrink: 0; }
+    nav { padding: 0.6rem 1.2rem; border-bottom: 1px solid var(--color-border-subtle); flex-shrink: 0;
+          display: flex; align-items: center; gap: 0.6rem; }
+    #nav-theme { margin-left: auto; display: flex; }
+    .theme-toggle {
+      display: flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; cursor: pointer;
+      background: var(--color-graph-control); color: var(--color-text-dim);
+      border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
+    }
+    .theme-toggle:hover { color: var(--color-text); background: var(--color-graph-control-hover); }
     nav a { color: var(--color-secondary); text-decoration: none; font-size: 0.85rem; }
 
     header { padding: 0.7rem 1.2rem 0.4rem; flex-shrink: 0; }
@@ -88,7 +98,8 @@
   </style>
 </head>
 <body>
-  <nav><a href="/">← all projects</a> <a id="nav-project" href="#" hidden>· ← this project</a></nav>
+  <nav><a href="/">← all projects</a> <a id="nav-project" href="#" hidden>· ← this project</a>
+    <span id="nav-theme"></span></nav>
   <header>
     <h1>CPM Graph — <span id="proj-name">…</span></h1>
     <div id="meta">Loading…</div>
@@ -118,6 +129,8 @@
   <div id="info-panel"><span class="placeholder">Click a node to see task details</span></div>
 
   <script>
+  window.cruxTheme?.mountToggle(document.getElementById('nav-theme'));
+
   // ── Fetch helper ──────────────────────────────────────────────────────────────
   async function fetchJson(url) {
     const r = await fetch(url);
