@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test test/unit/**/*.test.ts",
     "test:agent": "node --test test/integration/**/*.test.ts",
+    "test:e2e": "playwright test",
     "lint": "node --check index.ts lib/**/*.ts",
     "typecheck": "tsgo --noEmit",
     "format": "echo 'no formatter configured'",
@@ -18,6 +19,7 @@
     "preview": "node dist/crux.cjs ui --no-open"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.0.0",
     "@typescript/native-preview": "^7.0.0-dev",
     "esbuild": "^0.28.1"

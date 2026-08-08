@@ -8,3 +8,9 @@ dist/
 *.db-shm
 *.db-wal
 .DS_Store
+
+# e2e build artifacts
+.e2e-home/
+test/e2e/screenshots/
+test/e2e/.output/
+playwright-report/

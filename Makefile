@@ -219,7 +219,7 @@ sea-macos: start ensure-deps ## Build macOS arm64 SEA → dist/crux-macos-arm64,
 # CI Parity
 # --------------------------------------------------
 
-ci: validate build ## CI pipeline entrypoint
+ci: validate build test-e2e ## CI pipeline entrypoint (unit + lint + bundle + e2e)
 
 # --------------------------------------------------
 # E2E Tests (Playwright PWA)
@@ -227,14 +227,26 @@ ci: validate build ## CI pipeline entrypoint
 
 IMAGE_E2E := crux-e2e
 
-test-e2e: ## Build e2e image and run Playwright PWA tests (requires crux ui running on :8765)
+e2e-image: ## Build the Playwright container (browsers live outside /app)
 	@echo "🎭 Building e2e container..."
-	$(CONTAINER_BIN) build -t $(IMAGE_E2E) -f .crux/Containerfile.e2e .
+	$(CONTAINER_BIN) build -t $(IMAGE_E2E) -f Containerfile.e2e .
+
+# Playwright starts the server itself (see webServer in playwright.config.ts),
+# so there is no "start crux ui first" prerequisite any more. It boots the
+# bundled artifact, which is why this depends on `bundle` — e2e should exercise
+# what actually ships, including esbuild's inlining of ui/*.
+#
+# node_modules gets its own volume rather than being baked into the image, so
+# mounting the working tree cannot shadow it — the previous target mounted over
+# the image's node_modules and left npx with nothing to run.
+test-e2e: bundle e2e-image ## Run Playwright e2e tests + capture theme screenshots
 	@echo "🎭 Running Playwright e2e tests..."
 	$(CONTAINER_BIN) run -i --rm \
-		--network host \
 		-v "$(CURDIR):$(WORKDIR)" \
-		$(IMAGE_E2E)
+		-v node_modules_cache:$(WORKDIR)/node_modules \
+		-e CI=true \
+		$(IMAGE_E2E) sh -c 'npm ci --no-audit --no-fund && npx playwright test'
+	@echo "📸 Screenshots: test/e2e/screenshots/"
 
 # --------------------------------------------------
 # Developer Utilities

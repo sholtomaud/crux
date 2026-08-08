@@ -36,3 +36,38 @@ jobs:
       - run: npm test
 
       - run: npm run typecheck
+
+  e2e:
+    name: e2e + theme screenshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25.x
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      # e2e drives the bundled artifact, so the bundle has to exist first.
+      - run: npm run bundle
+
+      - run: npm run test:e2e
+
+      # The screenshots are the reviewable output: a themed UI change can be
+      # judged from the PR without anyone checking the branch out.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: theme-screenshots
+          path: test/e2e/screenshots/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
