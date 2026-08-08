@@ -59,6 +59,33 @@ export function updateProjectDailyCost(db: DatabaseSync, id: string, dailyCost: 
   db.prepare('UPDATE projects SET daily_cost = ? WHERE id = ?').run(dailyCost, id);
 }
 
+/**
+ * Max logline length. This is a layout contract, not a style preference — the
+ * Portfolio grid clamps loglines to two lines, and an unbounded one breaks
+ * every card in the row. Enforced here so every write path (CLI, MCP bulk
+ * update, PATCH /api/project/:id) inherits the same rule.
+ */
+export const LOGLINE_MAX_LENGTH = 120;
+
+/**
+ * Updates the project's prose fields. Follows updateProjectEnv's contract: a
+ * key left `undefined` leaves the column untouched, an explicit `null` clears
+ * it. Validation runs before any write so an over-length logline cannot leave
+ * a partially-applied update behind.
+ */
+export function updateProjectProse(
+  db: DatabaseSync,
+  id: string,
+  opts: { logline?: string | null; description?: string | null; spec?: string | null }
+): void {
+  if (opts.logline != null && opts.logline.length > LOGLINE_MAX_LENGTH) {
+    throw new Error(`logline exceeds ${LOGLINE_MAX_LENGTH} characters (got ${opts.logline.length})`);
+  }
+  if (opts.logline     !== undefined) db.prepare('UPDATE projects SET logline = ? WHERE id = ?').run(opts.logline, id);
+  if (opts.description !== undefined) db.prepare('UPDATE projects SET description = ? WHERE id = ?').run(opts.description, id);
+  if (opts.spec        !== undefined) db.prepare('UPDATE projects SET spec = ? WHERE id = ?').run(opts.spec, id);
+}
+
 export function setDefaultDailyCost(db: DatabaseSync, amount: number): void {
   setConfig(db, 'default_daily_cost', String(amount));
 }

@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS projects (
     id              TEXT PRIMARY KEY,   -- UUID
     project_number  INTEGER UNIQUE,     -- stable 1-based display number (gaps from drops are OK)
     name            TEXT NOT NULL,
+    logline         TEXT,               -- one-line summary, capped at 120 chars on write (layout contract)
+    description     TEXT,               -- long-form prose, rendered on the project About tab
+    spec            TEXT,               -- specification, rendered on the project Spec tab
     type            TEXT NOT NULL CHECK(type IN ('code_repo','article','research','freelance','learning','personal')),
     status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','stalled','paused','done','dropped')),
     gh_repo         TEXT,               -- owner/repo or NULL

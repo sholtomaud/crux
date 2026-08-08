@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { applyMigrations } from '../../lib/db/open.ts';
-import { insertProject, allProjects, projectById, updateProjectDailyCost, setDefaultDailyCost, resolveDailyCost, updateProjectRepoPath } from '../../lib/db/projects.ts';
+import { insertProject, allProjects, projectById, updateProjectDailyCost, setDefaultDailyCost, resolveDailyCost, updateProjectRepoPath, updateProjectProse, LOGLINE_MAX_LENGTH } from '../../lib/db/projects.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = dirname(__filename);
@@ -178,5 +178,116 @@ describe('daily_cost', () => {
     updateProjectDailyCost(db, p.id, 200);
     const updated = projectById(db, p.id)!;
     assert.equal(resolveDailyCost(db, updated), 200);
+  });
+});
+
+describe('project prose (logline, description, spec)', () => {
+  test('all three are null on a freshly inserted project', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'code_repo' });
+    assert.equal(p.logline, null);
+    assert.equal(p.description, null);
+    assert.equal(p.spec, null);
+  });
+
+  test('round-trips all three through projectById', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'code_repo' });
+    updateProjectProse(db, p.id, {
+      logline:     'A personal project manager that finds your critical path.',
+      description: '# About\n\nLonger prose describing the project.',
+      spec:        '## Spec\n\n- requirement one\n- requirement two',
+    });
+    const updated = projectById(db, p.id)!;
+    assert.equal(updated.logline,     'A personal project manager that finds your critical path.');
+    assert.equal(updated.description, '# About\n\nLonger prose describing the project.');
+    assert.equal(updated.spec,        '## Spec\n\n- requirement one\n- requirement two');
+  });
+
+  // Mirrors updateProjectEnv's contract: an omitted key leaves the column
+  // untouched, an explicit null is the way to clear it.
+  test('omitted fields are left untouched, explicit null clears', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'code_repo' });
+    updateProjectProse(db, p.id, { logline: 'first', description: 'keep me', spec: 'and me' });
+
+    updateProjectProse(db, p.id, { logline: 'second' });
+    let updated = projectById(db, p.id)!;
+    assert.equal(updated.logline,     'second');
+    assert.equal(updated.description, 'keep me');
+    assert.equal(updated.spec,        'and me');
+
+    updateProjectProse(db, p.id, { description: null });
+    updated = projectById(db, p.id)!;
+    assert.equal(updated.description, null);
+    assert.equal(updated.logline,     'second');
+    assert.equal(updated.spec,        'and me');
+  });
+
+  // The cap is a layout contract, not a style preference — an unbounded
+  // logline breaks every card in the Portfolio grid.
+  test('logline at exactly the cap is accepted', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'code_repo' });
+    const atCap = 'x'.repeat(LOGLINE_MAX_LENGTH);
+    updateProjectProse(db, p.id, { logline: atCap });
+    assert.equal(projectById(db, p.id)!.logline, atCap);
+  });
+
+  test('logline one character over the cap throws and writes nothing', () => {
+    const db = makeDb();
+    const p  = insertProject(db, { name: 'Alpha', type: 'code_repo' });
+    updateProjectProse(db, p.id, { logline: 'original' });
+    assert.throws(
+      () => updateProjectProse(db, p.id, { logline: 'x'.repeat(LOGLINE_MAX_LENGTH + 1), spec: 'should not land' }),
+      /logline/i,
+    );
+    const after = projectById(db, p.id)!;
+    assert.equal(after.logline, 'original');
+    assert.equal(after.spec,    null);
+  });
+
+  test('applyMigrations adds the three columns to a legacy DB missing them, idempotently', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'personal', status TEXT NOT NULL DEFAULT 'active',
+        gh_repo TEXT, gh_sync INTEGER NOT NULL DEFAULT 0, sheets_id TEXT,
+        hourly_rate REAL, run_env TEXT NOT NULL DEFAULT 'shell',
+        verify_cmd TEXT, test_cmd TEXT, container_image TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS global_config (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, slug TEXT NOT NULL,
+        title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', priority INTEGER NOT NULL DEFAULT 0,
+        task_type TEXT NOT NULL DEFAULT 'coding', executor TEXT NOT NULL DEFAULT 'auto',
+        is_critical INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(project_id, slug)
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')), ended_at TEXT, note TEXT,
+        minutes REAL, container_name TEXT
+      );
+    `);
+    const id = randomUUID();
+    db.prepare('INSERT INTO projects (id, name, type) VALUES (?, ?, ?)').run(id, 'Legacy', 'code_repo');
+
+    applyMigrations(db);
+    applyMigrations(db); // second pass must be a no-op, not a duplicate-column error
+
+    const cols = (db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map(r => r.name);
+    assert.ok(cols.includes('logline'));
+    assert.ok(cols.includes('description'));
+    assert.ok(cols.includes('spec'));
+
+    updateProjectProse(db, id, { logline: 'migrated fine' });
+    assert.equal(projectById(db, id)!.logline, 'migrated fine');
   });
 });

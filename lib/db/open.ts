@@ -100,6 +100,15 @@ export function applyMigrations(db: DatabaseSync): void {
   if (!projCols.includes('repo_path')) {
     db.exec('ALTER TABLE projects ADD COLUMN repo_path TEXT;');
   }
+  if (!projCols.includes('logline')) {
+    db.exec('ALTER TABLE projects ADD COLUMN logline TEXT;');
+  }
+  if (!projCols.includes('description')) {
+    db.exec('ALTER TABLE projects ADD COLUMN description TEXT;');
+  }
+  if (!projCols.includes('spec')) {
+    db.exec('ALTER TABLE projects ADD COLUMN spec TEXT;');
+  }
 
   // sessions migrations
   if (!sessionCols.includes('container_name')) {

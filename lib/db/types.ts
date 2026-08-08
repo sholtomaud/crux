@@ -40,6 +40,9 @@ export interface Project {
   id: string;
   project_number: number;
   name: string;
+  logline: string | null;
+  description: string | null;
+  spec: string | null;
   type: ProjectType;
   status: ProjectStatus;
   gh_repo: string | null;
