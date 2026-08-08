@@ -35,7 +35,7 @@ function seedTask(db: DatabaseSync, projectId: string, slug: string, opts: { tit
     INSERT INTO tasks (project_id, slug, title, status, phase, duration_days, actual_days, estimated_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    projectId, slug, opts.title ?? slug, opts.status ?? 'open', opts.phase ?? null, opts.duration_days ?? null,
+    projectId, slug, opts.title ?? slug, opts.status ?? 'open', opts.phase ?? null, opts.duration_days ?? 1,
     opts.actual_days ?? null, opts.estimated_by ?? 'human',
   );
   return db.prepare('SELECT id FROM tasks WHERE project_id = ? AND slug = ?').get(projectId, slug) as { id: number };

@@ -23,7 +23,8 @@ export function insertTask(
     description?: string;
     phase?: string;
     priority?: number;
-    duration_days?: number;
+    /** Estimated effort in days. Required — CPM cannot schedule without it. */
+    duration_days: number;
     coverage_target?: number;
     value_score?: number;
     task_type?: TaskType;
@@ -33,6 +34,13 @@ export function insertTask(
     files_to_create?: Array<{ path: string; signature: string; imports?: string }>;
   }
 ): Task {
+  // Guarded at runtime as well as in the type, because the MCP and CLI entry
+  // points hand over values parsed from untyped input.
+  if (typeof opts.duration_days !== 'number' || !Number.isFinite(opts.duration_days) || opts.duration_days < 0) {
+    throw new Error(
+      `duration_days is required and must be a non-negative number (task "${opts.slug}", got ${String(opts.duration_days)})`
+    );
+  }
   db.prepare(`
     INSERT INTO tasks
       (project_id, slug, title, description, phase, priority, duration_days,
@@ -46,7 +54,7 @@ export function insertTask(
     opts.description ?? null,
     opts.phase ?? null,
     opts.priority ?? 0,
-    opts.duration_days ?? null,
+    opts.duration_days,
     opts.coverage_target ?? null,
     opts.value_score ?? null,
     opts.task_type ?? 'coding',

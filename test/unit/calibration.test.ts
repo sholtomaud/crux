@@ -57,8 +57,9 @@ describe('taskEstimateRatio', () => {
     assert.equal(taskEstimateRatio({ actual_days: null, duration_days: 1 }), null);
   });
 
-  test('null when duration_days is unset or zero', () => {
-    assert.equal(taskEstimateRatio({ actual_days: 1, duration_days: null }), null);
+  // duration_days is mandatory now, so an unset estimate is no longer
+  // representable — zero remains reachable and would divide by zero.
+  test('null when duration_days is zero', () => {
     assert.equal(taskEstimateRatio({ actual_days: 1, duration_days: 0 }), null);
   });
 });

@@ -67,7 +67,7 @@ export interface Task {
   phase: string | null;
   status: TaskStatus;
   priority: number;
-  duration_days: number | null;
+  duration_days: number;
   actual_days: number | null;
   estimated_by: EstimatedBy;
   early_start: number | null;

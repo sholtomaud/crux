@@ -42,7 +42,7 @@ function fakeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 1, project_id: 'p', slug: 'p1-thing', title: 'Do the thing',
     description: null, phase: null, status: 'open', priority: 3,
-    duration_days: null, actual_days: null, estimated_by: 'human',
+    duration_days: 1, actual_days: null, estimated_by: 'human',
     early_start: null, early_finish: null, late_start: null, late_finish: null,
     float_days: null, is_critical: 0, gh_issue_number: null, worktree_path: null,
     coverage_target: null, value_score: null, task_type: 'coding', executor: 'llm',
@@ -66,9 +66,12 @@ describe('formatTaskDetail', () => {
     assert.ok(!formatTaskDetail(fakeTask(), NO_DEPS).includes('★'));
   });
 
+  // duration_days is mandatory, so it always renders a real number. The CPM
+  // fields stay nullable until a schedule has been computed, and those are what
+  // must not leak "null" into the output.
   test('renders em-dashes for unset numeric fields rather than null', () => {
     const out = formatTaskDetail(fakeTask(), NO_DEPS);
-    assert.ok(out.includes('Duration:  —d est'));
+    assert.ok(out.includes('Duration:  1d est'));
     assert.ok(out.includes('float —'));
     assert.ok(!out.includes('null'));
   });

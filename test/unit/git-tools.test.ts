@@ -210,7 +210,7 @@ describe('resolveTaskCwd', () => {
   test('returns the task worktree_path when the task has one and it exists on disk', () => {
     const db = makeDb();
     const proj = insertProject(db, { name: 'p', type: 'code_repo' });
-    const task = insertTask(db, { project_id: proj.id, slug: 'my-task', title: 'My task', executor: 'llm' });
+    const task = insertTask(db, { project_id: proj.id, slug: 'my-task', title: 'My task', executor: 'llm', duration_days: 1 });
     const worktreeDir = mkdtempSync(join(tmpdir(), 'crux-resolve-cwd-'));
     updateTaskWorktreePath(db, task.id, worktreeDir);
 
@@ -223,7 +223,7 @@ describe('resolveTaskCwd', () => {
   test('falls back to repoRoot when the task has no worktree_path', () => {
     const db = makeDb();
     const proj = insertProject(db, { name: 'p', type: 'code_repo' });
-    insertTask(db, { project_id: proj.id, slug: 'no-worktree', title: 'No worktree', executor: 'llm' });
+    insertTask(db, { project_id: proj.id, slug: 'no-worktree', title: 'No worktree', executor: 'llm', duration_days: 1 });
 
     const cwd = resolveTaskCwd(db, proj.id, '/repo/root', 'no-worktree');
     assert.equal(cwd, '/repo/root');
@@ -232,7 +232,7 @@ describe('resolveTaskCwd', () => {
   test('falls back to repoRoot when the recorded worktree_path no longer exists on disk', () => {
     const db = makeDb();
     const proj = insertProject(db, { name: 'p', type: 'code_repo' });
-    const task = insertTask(db, { project_id: proj.id, slug: 'stale', title: 'Stale', executor: 'llm' });
+    const task = insertTask(db, { project_id: proj.id, slug: 'stale', title: 'Stale', executor: 'llm', duration_days: 1 });
     updateTaskWorktreePath(db, task.id, '/does/not/exist/anywhere');
 
     const cwd = resolveTaskCwd(db, proj.id, '/repo/root', 'stale');

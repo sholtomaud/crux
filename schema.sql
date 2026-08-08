@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     phase            TEXT,
     status           TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in-progress','blocked','done','dropped')),
     priority         INTEGER NOT NULL DEFAULT 0,
-    duration_days    REAL,
+    duration_days    REAL NOT NULL DEFAULT 1,   -- CPM cannot schedule without an estimate
     actual_days      REAL,              -- actual time spent, recorded on completion
     estimated_by     TEXT NOT NULL DEFAULT 'human' CHECK(estimated_by IN ('human','claude','auto')),
     -- CPM fields (computed, stored for reporting)

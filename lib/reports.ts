@@ -82,7 +82,7 @@ export function reportStatus(db: DatabaseSync, project: Project): string {
 
   // CPM
   const nodes: CpmNode[] = tasks.map(t => ({
-    id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase,
+    id: t.id, slug: t.slug, title: t.title, duration: t.duration_days, phase: t.phase,
   }));
   const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
   let cpmSummary = '';

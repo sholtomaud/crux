@@ -88,7 +88,7 @@ function apiProject(db: DatabaseSync, id: string, res: http.ServerResponse): voi
 function apiCpm(db: DatabaseSync, id: string, res: http.ServerResponse): void {
   const tasks = tasksByProject(db, id);
   const deps  = dependenciesByProject(db, id);
-  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
+  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days, phase: t.phase, value_score: t.value_score }));
   const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
   try {
     json(res, computeCpm(nodes, edges));

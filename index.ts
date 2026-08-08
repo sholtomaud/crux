@@ -145,7 +145,9 @@ STATUS
   ready                          Go/no-go release readiness
 
 TASKS
-  task add <slug> <title>        Add task [--type coding|writing|research|accounting|verification|design|other]
+  task add <slug> <title>        Add task (--duration <days> required)
+    --duration <days>            Estimated effort, e.g. 0.5 — CPM schedules off this
+    [--type T]                   coding|writing|research|accounting|verification|design|other
   task show <slug>               Full detail: spec, CPM, deps, recent activity
   task type <slug> <type>        Set task type
   task done <slug> [--note ""]   Mark done
@@ -227,8 +229,15 @@ async function cmdInit(args: string[]): Promise<void> {
   if (fromFile) {
     const mdPath = resolve(fromFile);
     if (existsSync(mdPath)) {
-      const seeded = seedFromTasksMd(db, project.id, readFileSync(mdPath, 'utf8'));
+      const { seeded, unestimated } = seedFromTasksMd(db, project.id, readFileSync(mdPath, 'utf8'));
       console.log(`✓ Seeded ${seeded} tasks from ${mdPath}`);
+      if (unestimated > 0) {
+        console.warn(
+          `  ${unestimated} of them had no duration column and were defaulted to 1 day.\n` +
+          `  CPM will schedule off those placeholders until you set real estimates:\n` +
+          `    crux task update <slug> --duration <days>`
+        );
+      }
     } else {
       console.warn(`  tasks.md not found at ${mdPath}`);
     }
@@ -247,8 +256,16 @@ async function cmdInit(args: string[]): Promise<void> {
   rl.close();
 }
 
-function seedFromTasksMd(db: ReturnType<typeof openDb>, projectId: string, md: string): number {
+/**
+ * Seeds tasks from a markdown table. Returns the number seeded plus how many
+ * rows carried no estimate — reported to the caller rather than swallowed, so
+ * a bulk import cannot quietly fill a backlog with invented one-day durations.
+ */
+function seedFromTasksMd(
+  db: ReturnType<typeof openDb>, projectId: string, md: string
+): { seeded: number; unestimated: number } {
   let seeded = 0;
+  let unestimated = 0;
   let currentPhase: string | null = null;
   const slugToId = new Map<string, number>();
   const pendingDeps: Array<[string, string]> = []; // [successor_slug, predecessor_slug]
@@ -258,7 +275,9 @@ function seedFromTasksMd(db: ReturnType<typeof openDb>, projectId: string, md: s
     const phaseMatch = line.match(/^##\s+(.+)/);
     if (phaseMatch) { currentPhase = phaseMatch[1].trim(); continue; }
 
-    // Table row: | slug | title | status | dep1, dep2 |  (backticks optional)
+    // Table row: | slug | title | status | dep1, dep2 | days |  (backticks
+    // optional; the trailing duration column is optional for back-compatibility
+    // with tasks.md files written before estimates were mandatory)
     const rowMatch = line.match(/^\|\s*`?([^`|\s][^|]*?)`?\s*\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|/);
     if (!rowMatch) continue;
 
@@ -269,11 +288,17 @@ function seedFromTasksMd(db: ReturnType<typeof openDb>, projectId: string, md: s
     const existing = taskBySlug(db, projectId, slug);
     if (existing) { slugToId.set(slug, existing.id); continue; }
 
+    const durationCell = line.split('|').map(c => c.trim())[5];
+    const parsedDuration = durationCell ? Number(durationCell) : NaN;
+    const hasEstimate = Number.isFinite(parsedDuration) && parsedDuration >= 0;
+    if (!hasEstimate) unestimated++;
+
     const task = insertTask(db, {
       project_id: projectId,
       slug: slug.trim(),
       title: title.trim(),
       phase: currentPhase ?? undefined,
+      duration_days: hasEstimate ? parsedDuration : 1,
     });
     if (taskStatus !== 'open') updateTaskStatus(db, projectId, slug.trim(), taskStatus);
     slugToId.set(slug.trim(), task.id);
@@ -293,7 +318,7 @@ function seedFromTasksMd(db: ReturnType<typeof openDb>, projectId: string, md: s
     }
   }
 
-  return seeded;
+  return { seeded, unestimated };
 }
 
 function installSkill(root: string): void {
@@ -342,7 +367,7 @@ function cmdCpm(): void {
   const proj = getProject();
   const tasks = tasksByProject(db, proj.id);
   const deps  = dependenciesByProject(db, proj.id);
-  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
+  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days, phase: t.phase, value_score: t.value_score }));
   const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
 
   const result = computeCpm(nodes, edges);
@@ -374,7 +399,7 @@ function cmdGraph(args: string[]): void {
   const proj = getProject();
   const tasks = tasksByProject(db, proj.id);
   const deps  = dependenciesByProject(db, proj.id);
-  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
+  const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days, phase: t.phase, value_score: t.value_score }));
   const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
 
   let cpmNodes;
@@ -399,11 +424,23 @@ function cmdTask(args: string[]): void {
   if (sub === 'add') {
     const slug     = args[1];
     const typeFlag = flag(args, '--type') as TaskType | null;
-    const titleArgs = args.slice(2).filter(a => !a.startsWith('--') && a !== typeFlag);
+    const durFlag  = flag(args, '--duration');
+    const titleArgs = args.slice(2).filter(a => !a.startsWith('--') && a !== typeFlag && a !== durFlag);
     const title    = titleArgs.join(' ');
-    if (!slug || !title) { console.error('Usage: crux task add <slug> <title> [--type coding|writing|research|accounting|verification|design|other]'); process.exit(1); }
+    const usage = 'Usage: crux task add <slug> <title> --duration <days> [--type coding|writing|research|accounting|verification|design|other]';
+    if (!slug || !title) { console.error(usage); process.exit(1); }
+    // An estimate is mandatory: CPM schedules off it, and a task added without
+    // one used to be silently scheduled as a single day.
+    if (durFlag === null) {
+      console.error(`--duration is required — CPM cannot schedule a task without an estimate.\n${usage}`);
+      process.exit(1);
+    }
+    const duration_days = Number(durFlag);
+    if (!Number.isFinite(duration_days) || duration_days < 0) {
+      console.error(`--duration must be a non-negative number of days, got "${durFlag}"`); process.exit(1);
+    }
     const task_type = (typeFlag && TASK_TYPES.includes(typeFlag)) ? typeFlag : undefined;
-    const task = insertTask(db, { project_id: proj.id, slug, title, task_type });
+    const task = insertTask(db, { project_id: proj.id, slug, title, task_type, duration_days });
     logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.add', detail: title, actor: 'human' });
     console.log(`✓ Task added: ${slug} [${task.task_type}]`);
     return;
@@ -940,7 +977,7 @@ function cmdContext(): void {
 
   const cpmNodes: CpmNode[] = allTasks.map(t => ({
     id: t.id, slug: t.slug, title: t.title,
-    duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score,
+    duration: t.duration_days, phase: t.phase, value_score: t.value_score,
   }));
   const cpmEdges: CpmEdge[] = deps.map(d => ({
     predecessor_id: d.predecessor_id, successor_id: d.successor_id,
@@ -979,7 +1016,7 @@ function nextUnblockedTasks(db: ReturnType<typeof openDb>, projId: string, phase
   const deps    = dependenciesByProject(db, projId);
   const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
 
-  const wsjf = (t: typeof tasks[0]) => (t.value_score ?? 0) / (t.duration_days ?? 1);
+  const wsjf = (t: typeof tasks[0]) => (t.value_score ?? 0) / t.duration_days;
 
   // in-progress tasks come first (resume before starting new ones), excluding human tasks
   const inProgress = tasks
@@ -1277,7 +1314,7 @@ async function runMcpServer(): Promise<void> {
         const proj  = requireProject();
         const tasks = tasksByProject(db, proj.id);
         const deps  = dependenciesByProject(db, proj.id);
-        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
+        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days, phase: t.phase, value_score: t.value_score }));
         const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
         const result = computeCpm(nodes, edges);
         for (const n of result.nodes) {
@@ -1307,7 +1344,7 @@ REQUIRED for research tasks: acceptance_criteria describing the decision to be m
       executor: z.enum(TASK_EXECUTORS).describe('Who can complete this: "llm" = safe for autonomous agentic pickup with no human judgment needed, "human" = requires a person (judgment call, external action, credentials), "hybrid" = agent does the work but a human must review/approve, "auto" = unknown/let the router decide later. Pick the narrowest true answer — do not default to "auto".'),
       description: z.string().optional().describe('Full description of what to build and why'),
       phase: z.string().optional(),
-      duration_days: z.number().optional(),
+      duration_days: z.number().min(0).describe('REQUIRED. Estimated effort in days — CPM schedules off this, so a task without one cannot be scheduled. Fractions are fine (0.25 = a quarter day).'),
       coverage_target: z.number().optional(),
       value_score: z.number().min(0).max(100).optional().describe('Business value 0-100 for WSJF prioritisation'),
       priority: z.number().min(0).max(100).optional().describe('Explicit priority override 0-100 (independent of WSJF)'),
@@ -1556,7 +1593,7 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
         const proj  = requireProject();
         const tasks = tasksByProject(db, proj.id);
         const deps  = dependenciesByProject(db, proj.id);
-        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score }));
+        const nodes: CpmNode[] = tasks.map(t => ({ id: t.id, slug: t.slug, title: t.title, duration: t.duration_days, phase: t.phase, value_score: t.value_score }));
         const edges: CpmEdge[] = deps.map(d => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id }));
         let cpmNodes;
         try { cpmNodes = computeCpm(nodes, edges).nodes; } catch { cpmNodes = undefined; }
@@ -1730,7 +1767,7 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
         // CPM summary
         const cpmNodes: CpmNode[] = allTasks.map(t => ({
           id: t.id, slug: t.slug, title: t.title,
-          duration: t.duration_days ?? 1, phase: t.phase, value_score: t.value_score,
+          duration: t.duration_days, phase: t.phase, value_score: t.value_score,
         }));
         const cpmEdges: CpmEdge[] = deps.map(d => ({
           predecessor_id: d.predecessor_id, successor_id: d.successor_id,

@@ -69,6 +69,21 @@ export function applyMigrations(db: DatabaseSync): void {
   if (!taskCols.includes('worktree_path')) {
     db.exec('ALTER TABLE tasks ADD COLUMN worktree_path TEXT;');
   }
+  // Every task must carry an estimate. The old read-time `duration_days ?? 1`
+  // invented a day per unestimated task on every CPM pass, so the schedule was
+  // topologically correct but temporally fictional, and the invented value was
+  // never visible or correctable. Backfill it once so it becomes real data.
+  //
+  // schema.sql declares NOT NULL for fresh databases. Existing ones keep a
+  // nullable column: SQLite cannot add NOT NULL to an existing column without a
+  // full table rebuild, and tasks is referenced by dependencies and task_adrs
+  // with ON DELETE CASCADE — dropping the table mid-rebuild would take the
+  // dependency graph with it. The backfill plus insertTask's guard close the
+  // gap without putting that graph at risk.
+  if (!taskCols.includes('duration_days')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN duration_days REAL;');
+  }
+  db.exec('UPDATE tasks SET duration_days = 1 WHERE duration_days IS NULL;');
 
   // projects migrations
   if (!projCols.includes('project_number')) {
