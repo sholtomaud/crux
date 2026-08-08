@@ -139,7 +139,7 @@ describe('light and dark themes', () => {
   });
 });
 
-describe('light palette meets WCAG AA', () => {
+describe('both palettes meet WCAG AA', () => {
   const lin = (c: number) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : (((c / 255) + 0.055) / 1.055) ** 2.4);
 
   function luminance(hex: string): number {
@@ -154,26 +154,62 @@ describe('light palette meets WCAG AA', () => {
     return (a + 0.05) / (b + 0.05);
   }
 
-  const val = (t: string) => rootTokens.get(t)!;
-
   // Body-text tokens must clear 4.5:1 on both grounds they are used against.
   const BODY_TEXT = ['--color-text', '--color-text-muted', '--color-text-subtle',
                      '--color-text-faint', '--color-text-dim', '--color-text-dimmer',
-                     '--color-primary', '--color-secondary', '--color-danger', '--color-warning',
+                     '--color-accent', '--color-primary', '--color-secondary',
+                     '--color-danger', '--color-warning',
                      '--color-executor-llm', '--color-executor-human',
-                     '--color-executor-hybrid', '--color-executor-auto', '--color-wsjf'];
+                     '--color-executor-hybrid', '--color-executor-auto', '--color-wsjf',
+                     '--color-graph-label', '--color-graph-label-crit'];
 
-  for (const bg of ['--color-bg', '--color-surface-container']) {
-    test(`body text clears 4.5:1 on ${bg}`, () => {
-      const fails = BODY_TEXT
-        .map(t => ({ t, r: ratio(val(t), val(bg)) }))
-        .filter(({ r }) => r < 4.5)
-        .map(({ t, r }) => `${t} ${r.toFixed(2)}:1`);
-      assert.deepEqual(fails, [], `below AA on ${bg}: ${fails.join(', ')}`);
+  // Small, decorative metadata — AA's 3:1 non-text/large-text bar is the honest
+  // one here, not 4.5:1.
+  const DECORATIVE = ['--color-text-faintest', '--color-graph-meta',
+                      '--color-graph-wsjf-chip-empty', '--color-graph-phase-chip'];
+
+  // Both themes are enforced. Checking only :root would have let the dark
+  // palette keep the 15 AA failures it shipped with before this was widened.
+  const THEMES: Array<[string, Map<string, string>]> = [
+    ['light', rootTokens],
+    ['dark',  darkExplicit],
+  ];
+
+  for (const [theme, pal] of THEMES) {
+    const val = (t: string) => {
+      const v = pal.get(t);
+      assert.ok(v, `${t} missing from the ${theme} palette`);
+      return v!;
+    };
+
+    for (const bg of ['--color-bg', '--color-surface-container']) {
+      test(`${theme}: body text clears 4.5:1 on ${bg}`, () => {
+        const fails = BODY_TEXT
+          .map(t => ({ t, r: ratio(val(t), val(bg)) }))
+          .filter(({ r }) => r < 4.5)
+          .map(({ t, r }) => `${t} ${r.toFixed(2)}:1`);
+        assert.deepEqual(fails, [], `${theme} below AA on ${bg}: ${fails.join(', ')}`);
+      });
+
+      test(`${theme}: decorative text clears 3:1 on ${bg}`, () => {
+        const fails = DECORATIVE
+          .map(t => ({ t, r: ratio(val(t), val(bg)) }))
+          .filter(({ r }) => r < 3)
+          .map(({ t, r }) => `${t} ${r.toFixed(2)}:1`);
+        assert.deepEqual(fails, [], `${theme} below 3:1 on ${bg}: ${fails.join(', ')}`);
+      });
+    }
+
+    test(`${theme}: text on a filled accent button clears 4.5:1`, () => {
+      const r = ratio(val('--color-on-primary'), val('--color-accent'));
+      assert.ok(r >= 4.5, `${theme}: on-primary on accent is ${r.toFixed(2)}:1`);
+    });
+
+    test(`${theme}: graph nodes are distinguishable from the canvas`, () => {
+      // Below 1.2:1 the node border is the only thing holding the diagram
+      // together, which reads as a flat wash.
+      const r = ratio(val('--color-graph-node-fill'), val('--color-graph-canvas'));
+      assert.ok(r >= 1.2, `${theme}: node fill vs canvas is only ${r.toFixed(2)}:1`);
     });
   }
-
-  test('text on a filled primary button clears 4.5:1', () => {
-    assert.ok(ratio(val('--color-on-primary'), val('--color-primary')) >= 4.5);
-  });
 });

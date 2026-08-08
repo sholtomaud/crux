@@ -4,12 +4,12 @@
  * Loaded by every page, including graph.html, which is otherwise standalone and
  * used to carry its own private copy of these colours. Nothing outside this file
  * may declare a literal colour: a hex anywhere else is invisible to the theme
- * switcher and would silently stay dark.
+ * switcher and would silently stay one theme.
  *
  * ── How the three theme states resolve ────────────────────────────────────────
  * The complete LIGHT palette is defined on bare :root, so every token always has
- * a value no matter which media query or attribute matches. Dark is then applied
- * twice, and both copies must stay identical:
+ * a value no matter which query matches. Dark is then applied twice, and both
+ * copies must stay identical:
  *
  *   1. @media (prefers-color-scheme: dark) + :root:not([data-theme="light"])
  *      — the "system" default, which needs no JavaScript at all. The :not()
@@ -17,21 +17,28 @@
  *   2. :root[data-theme="dark"]
  *      — an explicit choice, which must beat a light OS setting.
  *
- * No token may have its only definition inside a media or [data-theme] block:
- * that token would be undefined for half the users. test/unit/ui-tokens.test.ts
- * enforces both that rule and the equality of the two dark blocks.
+ * No token may have its only definition inside a media or [data-theme] block.
+ * test/unit/ui-tokens.test.ts enforces that, the equality of the two dark
+ * blocks, and WCAG AA contrast across BOTH themes.
+ *
+ * ── Visual language ───────────────────────────────────────────────────────────
+ * Surfaces are flat: one ground, one panel colour, and a hairline --color-border
+ * doing the separating, rather than a four-step grey elevation ramp. A single
+ * --color-accent drives every interactive surface (links, active nav, progress,
+ * primary CTA); --color-primary is reserved for success semantics so green and
+ * blue stop competing for the same job.
  */
 
 :root {
-  /* Surfaces */
+  /* Surfaces — one flat ground plus a hairline border, not a grey elevation ramp */
   --color-bg:                           #faf9f8;
   --color-surface:                      #ffffff;
-  --color-surface-container:            #f3f2f1;
-  --color-surface-container-high:       #edebe9;
-  --color-surface-container-highest:    #e1dfdd;
+  --color-surface-container:            #ffffff;  /* cards and panels: flat, separated by --color-border */
+  --color-surface-container-high:       #f3f2f1;
+  --color-surface-container-highest:    #edebe9;
   --color-sidebar-bg:                   #f3f2f1;
 
-  /* Borders */
+  /* Borders — these carry the separation the grey ramp used to */
   --color-border:                       #e1dfdd;
   --color-border-strong:                #c8c6c4;
   --color-border-subtle:                #edebe9;  /* table row rules, nav/panel dividers */
@@ -45,11 +52,12 @@
   --color-text-dim:                     #605e5c;
   --color-text-dimmer:                  #6e6c6a;
   --color-text-faintest:                #767472;
-  --color-on-primary:                   #ffffff;  /* text on a filled primary button */
+  --color-on-primary:                   #ffffff;  /* text on a filled accent button */
 
-  /* Accents */
-  --color-primary:                      #0b6a45;
-  --color-secondary:                    #0f548c;
+  /* Accents — one accent drives every interactive surface */
+  --color-accent:                       #0f6cbd;  /* links, active nav, progress fill, primary CTA */
+  --color-secondary:                    #0f6cbd;  /* kept as an alias so informational blue matches the accent */
+  --color-primary:                      #0b6a45;  /* success only — done states, not brand */
   --color-danger:                       #a4262c;
   --color-warning:                      #8a6100;
 
@@ -60,7 +68,7 @@
   --color-danger-border:                #f0b8bd;
   --color-warning-surface:              #fdf3d7;
   --color-info-surface:                 #e5eff9;
-  --color-neutral-surface:              #ebeae9;
+  --color-neutral-surface:              #f3f2f1;
   --color-warn-surface:                 #fff8e8;  /* portfolio spread-warning card */
   --color-warn-border:                  #e8cf9a;
 
@@ -80,9 +88,9 @@
   --color-wsjf-border:                  rgba(91, 50, 176, 0.28);
 
   /* Dependency graph */
-  --color-graph-canvas:                 #f3f2f1;  /* sits off the page ground so nodes read as objects */
+  --color-graph-canvas:                 #e9e7e5;  /* sits off the page ground so nodes read as objects */
   --color-graph-control:                #ffffff;
-  --color-graph-control-hover:          #f3f2f1;
+  --color-graph-control-hover:          #eeecea;
   --color-graph-control-border-hover:   #8a8886;
   --color-graph-node-fill:              #ffffff;
   --color-graph-node-stroke:            #c8c6c4;
@@ -98,9 +106,12 @@
   --color-graph-legend-fill:            #eef0f8;
   --color-graph-legend-border:          #b9c0e0;
 
-  /* Geometry and spacing — identical across themes */
-  --radius:              8px;
-  --radius-sm:           4px;
+  /* Typography and geometry — identical across themes */
+  --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius:              4px;
+  --radius-sm:           2px;
   --space-card-padding:  0.85rem;
   --space-section-gap:   1.5rem;
   --space-gutter-md:     1.25rem;
@@ -111,157 +122,159 @@
 /* Dark, as the system preference. An explicit light choice wins over it. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    /* Surfaces */
-    --color-bg:                           #0f0f0f;
-    --color-surface:                      #141414;
-    --color-surface-container:            #1a1a1a;
-    --color-surface-container-high:       #202020;
-    --color-surface-container-highest:    #2a2a2a;
-    --color-sidebar-bg:                   #131313;
+    /* Surfaces — one flat ground plus a hairline border, not a grey elevation ramp */
+    --color-bg:                           #1b1a19;
+    --color-surface:                      #201f1e;
+    --color-surface-container:            #201f1e;  /* cards and panels: flat, separated by --color-border */
+    --color-surface-container-high:       #292827;
+    --color-surface-container-highest:    #323130;
+    --color-sidebar-bg:                   #201f1e;
 
-    /* Borders */
-    --color-border:                       #242424;
-    --color-border-strong:                #333333;
-    --color-border-subtle:                #1e1e1e;  /* table row rules, nav/panel dividers */
+    /* Borders — these carry the separation the grey ramp used to */
+    --color-border:                       #3b3a39;
+    --color-border-strong:                #484644;
+    --color-border-subtle:                #292827;  /* table row rules, nav/panel dividers */
 
     /* Text, brightest to faintest */
-    --color-text:                         #e0e0e0;
+    --color-text:                         #f3f2f1;
     --color-text-bright:                  #ffffff;
-    --color-text-muted:                   #cccccc;
-    --color-text-subtle:                  #aaaaaa;
-    --color-text-faint:                   #888888;
-    --color-text-dim:                     #666666;
-    --color-text-dimmer:                  #555555;
-    --color-text-faintest:                #444444;
-    --color-on-primary:                   #000000;  /* text on a filled primary button */
+    --color-text-muted:                   #e1dfdd;
+    --color-text-subtle:                  #d2d0ce;
+    --color-text-faint:                   #c8c6c4;
+    --color-text-dim:                     #b3b0ad;
+    --color-text-dimmer:                  #a19f9d;
+    --color-text-faintest:                #8a8886;
+    --color-on-primary:                   #1b1a19;  /* text on a filled accent button */
 
-    /* Accents */
-    --color-primary:                      #34d399;
-    --color-secondary:                    #60a5fa;
-    --color-danger:                       #f87171;
-    --color-warning:                      #f59e0b;
+    /* Accents — one accent drives every interactive surface */
+    --color-accent:                       #479ef5;  /* links, active nav, progress fill, primary CTA */
+    --color-secondary:                    #479ef5;  /* kept as an alias so informational blue matches the accent */
+    --color-primary:                      #5ec49a;  /* success only — done states, not brand */
+    --color-danger:                       #f1707b;
+    --color-warning:                      #e3b341;
 
     /* Tonal status surfaces (badge and button backgrounds) */
-    --color-success-surface:              #1a3a2a;
-    --color-success-border:               #2a5a3a;
-    --color-danger-surface:               #3a1a1a;
-    --color-danger-border:                #5a2a2a;
-    --color-warning-surface:              #3a2e1a;
-    --color-info-surface:                 #1e3a5f;
-    --color-neutral-surface:              #2a2a2a;
-    --color-warn-surface:                 #1a1608;  /* portfolio spread-warning card */
-    --color-warn-border:                  #4a3a1a;
+    --color-success-surface:              #1a3325;
+    --color-success-border:               #2f5c45;
+    --color-danger-surface:               #3b1f22;
+    --color-danger-border:                #6b3238;
+    --color-warning-surface:              #3a2f1a;
+    --color-info-surface:                 #17324d;
+    --color-neutral-surface:              #323130;
+    --color-warn-surface:                 #2b2416;  /* portfolio spread-warning card */
+    --color-warn-border:                  #5a4a20;
 
     /* Executor identity */
-    --color-executor-llm:                 #22d3ee;
-    --color-executor-human:               #c084fc;
-    --color-executor-hybrid:              #f472b6;
-    --color-executor-auto:                #777777;
-    --color-executor-llm-surface:         #123a3a;
-    --color-executor-human-surface:       #2a1a3a;
-    --color-executor-hybrid-surface:      #3a1a2e;
-    --color-executor-auto-surface:        #242424;
+    --color-executor-llm:                 #4fd8eb;
+    --color-executor-human:               #c6a4f5;
+    --color-executor-hybrid:              #f79bc4;
+    --color-executor-auto:                #b3b0ad;
+    --color-executor-llm-surface:         #123a3f;
+    --color-executor-human-surface:       #2d1f45;
+    --color-executor-hybrid-surface:      #3f1f30;
+    --color-executor-auto-surface:        #323130;
 
     /* WSJF accent (distinct from the status colours) */
-    --color-wsjf:                         #a78bfa;
-    --color-wsjf-surface:                 rgba(167, 139, 250, 0.12);
-    --color-wsjf-border:                  rgba(167, 139, 250, 0.3);
+    --color-wsjf:                         #b39bf0;
+    --color-wsjf-surface:                 rgba(179, 155, 240, 0.14);
+    --color-wsjf-border:                  rgba(179, 155, 240, 0.32);
 
     /* Dependency graph */
-    --color-graph-canvas:                 #0c0c0c;  /* sits off the page ground so nodes read as objects */
-    --color-graph-control:                #1c1c1c;
-    --color-graph-control-hover:          #262626;
-    --color-graph-control-border-hover:   #444444;
-    --color-graph-node-fill:              #111122;
-    --color-graph-node-stroke:            #2a2a3a;
-    --color-graph-node-fill-crit:         #2d1212;
-    --color-graph-edge:                   #2e2e3e;
-    --color-graph-arrow:                  #4a4a5a;
-    --color-graph-label:                  #c4cde0;
-    --color-graph-label-crit:             #fca5a5;
-    --color-graph-meta:                   #606070;
-    --color-graph-wsjf-chip:              #7c6aaa;
-    --color-graph-wsjf-chip-empty:        #3a3a4a;
-    --color-graph-phase-chip:             #333348;
-    --color-graph-legend-fill:            #151528;
-    --color-graph-legend-border:          #333344;
+    --color-graph-canvas:                 #161514;  /* sits off the page ground so nodes read as objects */
+    --color-graph-control:                #201f1e;
+    --color-graph-control-hover:          #292827;
+    --color-graph-control-border-hover:   #605e5c;
+    --color-graph-node-fill:              #2b2a35;
+    --color-graph-node-stroke:            #3b3a39;
+    --color-graph-node-fill-crit:         #3b1f22;
+    --color-graph-edge:                   #4a4846;
+    --color-graph-arrow:                  #6e6c6a;
+    --color-graph-label:                  #e1dfdd;
+    --color-graph-label-crit:             #f1707b;
+    --color-graph-meta:                   #a19f9d;
+    --color-graph-wsjf-chip:              #b39bf0;
+    --color-graph-wsjf-chip-empty:        #8a8886;
+    --color-graph-phase-chip:             #8a8886;
+    --color-graph-legend-fill:            #2b2a35;
+    --color-graph-legend-border:          #4a4846;
   }
 }
 
 /* Dark, chosen explicitly. Wins over a light OS setting. */
 :root[data-theme="dark"] {
-    /* Surfaces */
-    --color-bg:                           #0f0f0f;
-    --color-surface:                      #141414;
-    --color-surface-container:            #1a1a1a;
-    --color-surface-container-high:       #202020;
-    --color-surface-container-highest:    #2a2a2a;
-    --color-sidebar-bg:                   #131313;
+    /* Surfaces — one flat ground plus a hairline border, not a grey elevation ramp */
+    --color-bg:                           #1b1a19;
+    --color-surface:                      #201f1e;
+    --color-surface-container:            #201f1e;  /* cards and panels: flat, separated by --color-border */
+    --color-surface-container-high:       #292827;
+    --color-surface-container-highest:    #323130;
+    --color-sidebar-bg:                   #201f1e;
 
-    /* Borders */
-    --color-border:                       #242424;
-    --color-border-strong:                #333333;
-    --color-border-subtle:                #1e1e1e;  /* table row rules, nav/panel dividers */
+    /* Borders — these carry the separation the grey ramp used to */
+    --color-border:                       #3b3a39;
+    --color-border-strong:                #484644;
+    --color-border-subtle:                #292827;  /* table row rules, nav/panel dividers */
 
     /* Text, brightest to faintest */
-    --color-text:                         #e0e0e0;
+    --color-text:                         #f3f2f1;
     --color-text-bright:                  #ffffff;
-    --color-text-muted:                   #cccccc;
-    --color-text-subtle:                  #aaaaaa;
-    --color-text-faint:                   #888888;
-    --color-text-dim:                     #666666;
-    --color-text-dimmer:                  #555555;
-    --color-text-faintest:                #444444;
-    --color-on-primary:                   #000000;  /* text on a filled primary button */
+    --color-text-muted:                   #e1dfdd;
+    --color-text-subtle:                  #d2d0ce;
+    --color-text-faint:                   #c8c6c4;
+    --color-text-dim:                     #b3b0ad;
+    --color-text-dimmer:                  #a19f9d;
+    --color-text-faintest:                #8a8886;
+    --color-on-primary:                   #1b1a19;  /* text on a filled accent button */
 
-    /* Accents */
-    --color-primary:                      #34d399;
-    --color-secondary:                    #60a5fa;
-    --color-danger:                       #f87171;
-    --color-warning:                      #f59e0b;
+    /* Accents — one accent drives every interactive surface */
+    --color-accent:                       #479ef5;  /* links, active nav, progress fill, primary CTA */
+    --color-secondary:                    #479ef5;  /* kept as an alias so informational blue matches the accent */
+    --color-primary:                      #5ec49a;  /* success only — done states, not brand */
+    --color-danger:                       #f1707b;
+    --color-warning:                      #e3b341;
 
     /* Tonal status surfaces (badge and button backgrounds) */
-    --color-success-surface:              #1a3a2a;
-    --color-success-border:               #2a5a3a;
-    --color-danger-surface:               #3a1a1a;
-    --color-danger-border:                #5a2a2a;
-    --color-warning-surface:              #3a2e1a;
-    --color-info-surface:                 #1e3a5f;
-    --color-neutral-surface:              #2a2a2a;
-    --color-warn-surface:                 #1a1608;  /* portfolio spread-warning card */
-    --color-warn-border:                  #4a3a1a;
+    --color-success-surface:              #1a3325;
+    --color-success-border:               #2f5c45;
+    --color-danger-surface:               #3b1f22;
+    --color-danger-border:                #6b3238;
+    --color-warning-surface:              #3a2f1a;
+    --color-info-surface:                 #17324d;
+    --color-neutral-surface:              #323130;
+    --color-warn-surface:                 #2b2416;  /* portfolio spread-warning card */
+    --color-warn-border:                  #5a4a20;
 
     /* Executor identity */
-    --color-executor-llm:                 #22d3ee;
-    --color-executor-human:               #c084fc;
-    --color-executor-hybrid:              #f472b6;
-    --color-executor-auto:                #777777;
-    --color-executor-llm-surface:         #123a3a;
-    --color-executor-human-surface:       #2a1a3a;
-    --color-executor-hybrid-surface:      #3a1a2e;
-    --color-executor-auto-surface:        #242424;
+    --color-executor-llm:                 #4fd8eb;
+    --color-executor-human:               #c6a4f5;
+    --color-executor-hybrid:              #f79bc4;
+    --color-executor-auto:                #b3b0ad;
+    --color-executor-llm-surface:         #123a3f;
+    --color-executor-human-surface:       #2d1f45;
+    --color-executor-hybrid-surface:      #3f1f30;
+    --color-executor-auto-surface:        #323130;
 
     /* WSJF accent (distinct from the status colours) */
-    --color-wsjf:                         #a78bfa;
-    --color-wsjf-surface:                 rgba(167, 139, 250, 0.12);
-    --color-wsjf-border:                  rgba(167, 139, 250, 0.3);
+    --color-wsjf:                         #b39bf0;
+    --color-wsjf-surface:                 rgba(179, 155, 240, 0.14);
+    --color-wsjf-border:                  rgba(179, 155, 240, 0.32);
 
     /* Dependency graph */
-    --color-graph-canvas:                 #0c0c0c;  /* sits off the page ground so nodes read as objects */
-    --color-graph-control:                #1c1c1c;
-    --color-graph-control-hover:          #262626;
-    --color-graph-control-border-hover:   #444444;
-    --color-graph-node-fill:              #111122;
-    --color-graph-node-stroke:            #2a2a3a;
-    --color-graph-node-fill-crit:         #2d1212;
-    --color-graph-edge:                   #2e2e3e;
-    --color-graph-arrow:                  #4a4a5a;
-    --color-graph-label:                  #c4cde0;
-    --color-graph-label-crit:             #fca5a5;
-    --color-graph-meta:                   #606070;
-    --color-graph-wsjf-chip:              #7c6aaa;
-    --color-graph-wsjf-chip-empty:        #3a3a4a;
-    --color-graph-phase-chip:             #333348;
-    --color-graph-legend-fill:            #151528;
-    --color-graph-legend-border:          #333344;
+    --color-graph-canvas:                 #161514;  /* sits off the page ground so nodes read as objects */
+    --color-graph-control:                #201f1e;
+    --color-graph-control-hover:          #292827;
+    --color-graph-control-border-hover:   #605e5c;
+    --color-graph-node-fill:              #2b2a35;
+    --color-graph-node-stroke:            #3b3a39;
+    --color-graph-node-fill-crit:         #3b1f22;
+    --color-graph-edge:                   #4a4846;
+    --color-graph-arrow:                  #6e6c6a;
+    --color-graph-label:                  #e1dfdd;
+    --color-graph-label-crit:             #f1707b;
+    --color-graph-meta:                   #a19f9d;
+    --color-graph-wsjf-chip:              #b39bf0;
+    --color-graph-wsjf-chip-empty:        #8a8886;
+    --color-graph-phase-chip:             #8a8886;
+    --color-graph-legend-fill:            #2b2a35;
+    --color-graph-legend-border:          #4a4846;
 }

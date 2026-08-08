@@ -144,7 +144,7 @@ function renderAgentPanel() {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { min-height: 100%; }
     body {
-      font-family: system-ui, monospace;
+      font-family: var(--font-sans);
       background: var(--color-bg);
       color: var(--color-text);
       display: grid;
@@ -164,7 +164,7 @@ function renderAgentPanel() {
     .sidebar-brand { padding: 1.1rem 1.25rem 0.9rem; }
     .brand-mark {
       font-weight: 900; font-size: 1.1rem; letter-spacing: -0.03em;
-      color: var(--color-primary);
+      color: var(--color-accent);
     }
     .sidebar-nav { display: flex; flex-direction: column; gap: 0.15rem; padding: 0 0.6rem; }
     .sidebar-link {
@@ -174,7 +174,7 @@ function renderAgentPanel() {
       letter-spacing: 0.04em; text-transform: uppercase;
     }
     .sidebar-link:hover { color: var(--color-text); background: var(--color-surface-container); text-decoration: none; }
-    .sidebar-link.active { color: var(--color-primary); background: var(--color-surface-container-high); }
+    .sidebar-link.active { color: var(--color-accent); background: var(--color-surface-container-high); }
     .sidebar-section-label {
       margin: 1.4rem 0 0.5rem; padding: 0 1.1rem;
       font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em;
@@ -188,7 +188,7 @@ function renderAgentPanel() {
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .sidebar-project-link:hover { color: var(--color-text); text-decoration: none; }
-    .sidebar-project-link.active { color: var(--color-primary); border-left-color: var(--color-primary); }
+    .sidebar-project-link.active { color: var(--color-accent); border-left-color: var(--color-accent); }
     .sidebar-loading { padding: 0.4rem 1.1rem; font-size: 0.78rem; color: var(--color-text-dimmer); }
     .sidebar-footer { padding: 0.6rem 0.6rem 0; }
     .theme-toggle {
@@ -201,10 +201,10 @@ function renderAgentPanel() {
 
     .btn-install {
       margin: 0.75rem; font-size: 0.75rem; font-family: inherit; cursor: pointer;
-      background: var(--color-success-surface); color: var(--color-primary); border: 1px solid var(--color-primary);
+      background: transparent; color: var(--color-accent); border: 1px solid var(--color-accent);
       padding: 0.4rem 0.85rem; border-radius: var(--radius-sm); transition: all 0.15s;
     }
-    .btn-install:hover { background: var(--color-primary); color: var(--color-on-primary); }
+    .btn-install:hover { background: var(--color-accent); color: var(--color-on-primary); }
 
     /* ── Main content area (each page fills grid-column: 2) ── */
     #app-main { grid-column: 2; grid-row: 1; overflow-y: auto; padding: var(--space-gutter-md) 2rem; }
@@ -276,11 +276,12 @@ function renderAgentPanel() {
     /* ── Cards / stats / progress ── */
     .card { background: var(--color-surface-container); border: 1px solid var(--color-border);
             border-radius: var(--radius); padding: var(--space-card-padding); }
-    .stat { background: var(--color-surface-container); border-radius: var(--radius); padding: 0.75rem 1rem; }
+    .stat { background: var(--color-surface-container); border: 1px solid var(--color-border);
+            border-radius: var(--radius); padding: 0.75rem 1rem; }
     .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--color-text-bright); }
     .stat-label { font-size: 0.72rem; color: var(--color-text-dim); margin-top: 0.2rem; }
-    .progress-bar-wrap { background: var(--color-surface-container-highest); border-radius: 3px; height: 4px; }
-    .progress-bar-fill { background: var(--color-primary); height: 100%; border-radius: 3px; transition: width 0.4s; }
+    .progress-bar-wrap { background: var(--color-surface-container-highest); border-radius: var(--radius-sm); height: 4px; }
+    .progress-bar-fill { background: var(--color-accent); height: 100%; border-radius: var(--radius-sm); transition: width 0.4s; }
     .loading { color: var(--color-text-dim); font-size: 0.85rem; padding: 2rem 0; }
     .error { color: var(--color-danger); font-size: 0.85rem; }
   `;

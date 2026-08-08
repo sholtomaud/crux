@@ -10,7 +10,7 @@
   <script src="/theme.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, monospace; background: var(--color-bg); color: var(--color-text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    body { font-family: var(--font-sans); background: var(--color-bg); color: var(--color-text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
     nav { padding: 0.6rem 1.2rem; border-bottom: 1px solid var(--color-border-subtle); flex-shrink: 0;
           display: flex; align-items: center; gap: 0.6rem; }
@@ -85,12 +85,12 @@
     .node:hover .node-bg      { stroke: var(--color-secondary); }
     .node.crit:hover .node-bg { stroke: var(--color-graph-label-crit); }
     .node-accent          { fill: var(--color-danger); }
-    .node-slug            { fill: var(--color-graph-label); }
+    .node-slug            { fill: var(--color-graph-label); font-family: var(--font-mono); }
     .node.crit .node-slug { fill: var(--color-graph-label-crit); }
-    .node-title           { fill: var(--color-graph-meta); }
-    .node-metrics         { fill: var(--color-graph-wsjf-chip); }
+    .node-title           { fill: var(--color-graph-meta); font-family: var(--font-mono); }
+    .node-metrics         { fill: var(--color-graph-wsjf-chip); font-family: var(--font-mono); }
     .node-metrics.no-wsjf { fill: var(--color-graph-wsjf-chip-empty); }
-    .node-phase           { fill: var(--color-graph-phase-chip); }
+    .node-phase           { fill: var(--color-graph-phase-chip); font-family: var(--font-mono); }
     .lbox.crit    { background: var(--color-graph-node-fill-crit); border: 1px solid var(--color-danger); }
     .lbox.noncrit { background: var(--color-graph-legend-fill); border: 1px solid var(--color-graph-legend-border); }
     .legend-wsjf  { color: var(--color-wsjf); }
@@ -271,7 +271,7 @@
 
       // Background
       g.appendChild(el('rect', {
-        x, y, width: NODE_W, height: NODE_H, rx: 8, ry: 8, class: 'node-bg',
+        x, y, width: NODE_W, height: NODE_H, rx: 4, ry: 4, class: 'node-bg',
       }));
 
       // Left accent bar for critical
@@ -285,7 +285,6 @@
         class: 'node-slug',
         'font-size': 12,
         'font-weight': 'bold',
-        'font-family': 'monospace',
       }));
 
       // Title
@@ -293,7 +292,6 @@
         x: x + 12, y: y + 36,
         class: 'node-title',
         'font-size': 10,
-        'font-family': 'monospace',
       }));
 
       // Metrics row
@@ -307,8 +305,7 @@
             x: x + 12, y: y + 53,
             class: cpm.wsjf_score != null ? 'node-metrics' : 'node-metrics no-wsjf',
             'font-size': 9.5,
-            'font-family': 'monospace',
-          }));
+              }));
         }
       }
 
@@ -318,8 +315,7 @@
           x: x + NODE_W - 8, y: y + NODE_H - 7,
           class: 'node-phase',
           'font-size': 8,
-          'font-family': 'monospace',
-          'text-anchor': 'end',
+            'text-anchor': 'end',
         }));
       }
 

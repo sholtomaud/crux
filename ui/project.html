@@ -21,7 +21,7 @@
     .session-btn { font: inherit; font-size: 0.78rem; border-radius: var(--radius-sm); padding: 0.4em 0.9em; cursor: pointer; display: inline-flex; align-items: center; gap: 0.4em; }
     .session-btn.start { background: var(--color-success-surface); color: var(--color-primary); border: 1px solid var(--color-success-border); }
     .session-btn.stop  { background: var(--color-danger-surface); color: var(--color-danger); border: 1px solid var(--color-danger-border); }
-    .session-timer { font-family: monospace; font-size: 0.85rem; color: var(--color-text); }
+    .session-timer { font-family: var(--font-mono); font-size: 0.85rem; color: var(--color-text); }
 
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: var(--space-section-gap); }
 
@@ -31,7 +31,7 @@
     .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-border); margin-bottom: 1.25rem; }
     .tab-link { padding: 0.55rem 1rem; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.03em;
                 color: var(--color-text-dim); border-bottom: 2px solid transparent; }
-    .tab-link.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+    .tab-link.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
     .tab-link:hover { text-decoration: none; color: var(--color-text); }
 
     .task-toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
@@ -56,7 +56,7 @@
     .dep-label { color: var(--color-text-dim); margin-right: 0.5rem; }
     .dep-empty { color: var(--color-text-dimmer); }
     .depchip { display: inline-block; background: var(--color-bg); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
-               padding: 0.1em 0.5em; font-family: monospace; font-size: 0.75rem; color: var(--color-text-muted); margin-right: 0.35rem; }
+               padding: 0.1em 0.5em; font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted); margin-right: 0.35rem; }
 
     .roi-table-wrap { margin-top: var(--space-section-gap); }
     h2 { font-size: 1rem; color: var(--color-text-subtle); margin: 0 0 0.75rem; }
