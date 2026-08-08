@@ -1164,9 +1164,11 @@ function cmdConfig(args: string[]): void {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function runMcpServer(): Promise<void> {
-  const { McpServer }          = await import('@modelcontextprotocol/sdk/server/mcp.js');
-  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-  const { z }                  = await import('zod');
+  // Local MCP implementation — see ADR-009. `z` is crux's own schema builder
+  // (lib/mcp/schema.ts), not zod: same call shape, no dependency behind it.
+  // Imported dynamically, as the SDK was, so the CLI path never loads it.
+  const { McpServer, StdioTransport } = await import('./lib/mcp/server.ts');
+  const { z }                         = await import('./lib/mcp/schema.ts');
 
   const server = new McpServer({ name: 'crux', version: '0.1.0' });
   const db     = openDb();
@@ -1916,7 +1918,7 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
   startServer();
 
   // ── Connect ────────────────────────────────────────────────────────────────
-  const transport = new StdioServerTransport();
+  const transport = new StdioTransport();
   await server.connect(transport);
 }
 
