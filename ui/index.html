@@ -32,6 +32,8 @@
     .initiative-progress-label { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--color-text-dim); margin-bottom: 0.3rem; }
     .initiative-next-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-dimmer); margin-bottom: 0.2rem; }
     .initiative-next-value { font-size: 0.82rem; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Stalled reads as a problem, not as a quiet absence of work. */
+    .initiative-next-value.is-blocked { color: var(--color-status-blocked); font-weight: 600; }
     .initiative-executor { display: flex; justify-content: flex-end; }
   </style>
 </head>
@@ -105,6 +107,15 @@
       initiativesEl.innerHTML = active.map(p => {
         const pct = p.task_count > 0 ? Math.round((p.done_count / p.task_count) * 100) : 0;
         const next = p.next_task;
+        // Three states, not two. A stalled project needs attention and a
+        // finished one does not, and rendering both as "No open tasks" hid
+        // exactly the case worth surfacing on a portfolio view.
+        const blockedBy = p.blocked_by ?? [];
+        const nextValue = next
+          ? next.title
+          : blockedBy.length
+            ? `Blocked — ${blockedBy.slice(0, 2).join(', ')}${blockedBy.length > 2 ? ` +${blockedBy.length - 2}` : ''}`
+            : 'No open tasks';
         return `
           <a href="/project?id=${p.id}" class="card initiative-card">
             <div class="initiative-top">
@@ -118,7 +129,7 @@
               </div>
               <div>
                 <div class="initiative-next-label">Next Action</div>
-                <div class="initiative-next-value">${next ? next.title : 'No open tasks'}</div>
+                <div class="initiative-next-value${!next && blockedBy.length ? ' is-blocked' : ''}">${nextValue}</div>
               </div>
               <div class="initiative-executor">${next ? executorBadge(next.executor) : ''}</div>
             </div>

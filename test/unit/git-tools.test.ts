@@ -65,6 +65,42 @@ describe('gitCommitFiles', () => {
     rmSync(join(work, '..'), { recursive: true, force: true });
   });
 
+  // Regression: `git add <path>` fails with "pathspec did not match any files"
+  // once the path is gone from the working tree, so any commit containing a
+  // deletion was rejected outright. The documented workaround was to run
+  // `git rm --cached` by hand first, which is also why this was easy to miss.
+  test('stages and commits a file that has been deleted from the working tree', () => {
+    const { work } = makeRepoWithOrigin();
+    writeFileSync(join(work, 'doomed.txt'), 'content\n');
+    sh('git', ['add', 'doomed.txt'], work);
+    sh('git', ['commit', '-m', 'add doomed.txt'], work);
+
+    rmSync(join(work, 'doomed.txt'));
+    const result = gitCommitFiles(work, 'remove doomed.txt', ['doomed.txt']);
+
+    assert.equal(result.ok, true, result.out);
+    const nameStatus = sh('git', ['show', '--name-status', '--format=', 'HEAD'], work).trim();
+    assert.match(nameStatus, /^D\s+doomed\.txt$/m, `expected a recorded deletion, got:\n${nameStatus}`);
+    rmSync(join(work, '..'), { recursive: true, force: true });
+  });
+
+  test('commits an add and a deletion together in one call', () => {
+    const { work } = makeRepoWithOrigin();
+    writeFileSync(join(work, 'old.txt'), 'old\n');
+    sh('git', ['add', 'old.txt'], work);
+    sh('git', ['commit', '-m', 'add old.txt'], work);
+
+    rmSync(join(work, 'old.txt'));
+    writeFileSync(join(work, 'new.txt'), 'new\n');
+    const result = gitCommitFiles(work, 'swap old for new', ['old.txt', 'new.txt']);
+
+    assert.equal(result.ok, true, result.out);
+    const nameStatus = sh('git', ['show', '--name-status', '--format=', 'HEAD'], work).trim();
+    assert.match(nameStatus, /^D\s+old\.txt$/m);
+    assert.match(nameStatus, /^A\s+new\.txt$/m);
+    rmSync(join(work, '..'), { recursive: true, force: true });
+  });
+
   test('returns ok:false and does not commit when no files are given', () => {
     const { work } = makeRepoWithOrigin();
     const before = sh('git', ['rev-parse', 'HEAD'], work).trim();

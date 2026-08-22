@@ -72,6 +72,41 @@
   --color-warn-surface:                 #fff8e8;  /* portfolio spread-warning card */
   --color-warn-border:                  #e8cf9a;
 
+  /* Cast by an unpinned slide-out over the page it covers */
+  --color-panel-shadow:                 rgba(0, 0, 0, 0.14);
+
+  /* ── Task status ──────────────────────────────────────────────────────────
+   * One pair per task status: a foreground used both as badge text and as the
+   * CPM graph node's outline stroke, plus the tonal surface behind the badge.
+   *
+   * These repeat the semantic accent values above rather than aliasing them
+   * with var(), exactly as --color-graph-label-crit already does. The graph
+   * needs to retune a status colour for legibility against the node fill
+   * without dragging every danger/warning surface in the app with it.
+   *
+   * The hues encode progress, not category: grey has not started, blue is
+   * moving, green is finished, red is stuck. Saturation rises as work
+   * advances, which is why 'todo' is deliberately the dullest thing on screen.
+   *
+   * todo and dropped share the grey family on purpose — both mean "not active
+   * work". They separate by weight, and on the graph by a dashed stroke on
+   * dropped, a second non-colour cue since hue alone would not carry it.
+   *
+   * Two contrast bars, both enforced by test/unit/ui-tokens.test.ts in BOTH
+   * themes: 4.5:1 against the paired surface (badge text is small), and 3:1
+   * against --color-graph-node-fill (a 2px stroke, the non-text bar).
+   */
+  --color-status-todo:                  #57534e;
+  --color-status-todo-surface:          #f3f2f1;
+  --color-status-in-progress:           #0f6cbd;
+  --color-status-in-progress-surface:   #e5eff9;
+  --color-status-blocked:               #a4262c;
+  --color-status-blocked-surface:       #fdeaec;
+  --color-status-done:                  #0b6a45;
+  --color-status-done-surface:          #dff3e9;
+  --color-status-dropped:               #6e6c6a;
+  --color-status-dropped-surface:       #f3f2f1;
+
   /* Executor identity */
   --color-executor-llm:                 #0e6b7c;
   --color-executor-human:               #6b2fb5;
@@ -117,6 +152,7 @@
   --space-gutter-md:     1.25rem;
   --sidebar-width:       240px;
   --agent-panel-width:   340px;
+  --task-panel-width:    380px;
 }
 
 /* Dark, as the system preference. An explicit light choice wins over it. */
@@ -163,6 +199,21 @@
     --color-neutral-surface:              #323130;
     --color-warn-surface:                 #2b2416;  /* portfolio spread-warning card */
     --color-warn-border:                  #5a4a20;
+
+    /* Cast by an unpinned slide-out over the page it covers */
+    --color-panel-shadow:                 rgba(0, 0, 0, 0.55);
+
+    /* Task status — see the :root block for the two contrast bars these meet */
+    --color-status-todo:                  #c8c6c4;
+    --color-status-todo-surface:          #323130;
+    --color-status-in-progress:           #479ef5;
+    --color-status-in-progress-surface:   #17324d;
+    --color-status-blocked:               #f1707b;
+    --color-status-blocked-surface:       #3b1f22;
+    --color-status-done:                  #5ec49a;
+    --color-status-done-surface:          #1a3325;
+    --color-status-dropped:               #a19f9d;
+    --color-status-dropped-surface:       #323130;
 
     /* Executor identity */
     --color-executor-llm:                 #4fd8eb;
@@ -243,6 +294,21 @@
     --color-neutral-surface:              #323130;
     --color-warn-surface:                 #2b2416;  /* portfolio spread-warning card */
     --color-warn-border:                  #5a4a20;
+
+    /* Cast by an unpinned slide-out over the page it covers */
+    --color-panel-shadow:                 rgba(0, 0, 0, 0.55);
+
+    /* Task status — see the :root block for the two contrast bars these meet */
+    --color-status-todo:                  #c8c6c4;
+    --color-status-todo-surface:          #323130;
+    --color-status-in-progress:           #479ef5;
+    --color-status-in-progress-surface:   #17324d;
+    --color-status-blocked:               #f1707b;
+    --color-status-blocked-surface:       #3b1f22;
+    --color-status-done:                  #5ec49a;
+    --color-status-done-surface:          #1a3325;
+    --color-status-dropped:               #a19f9d;
+    --color-status-dropped-surface:       #323130;
 
     /* Executor identity */
     --color-executor-llm:                 #4fd8eb;

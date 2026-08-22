@@ -62,6 +62,9 @@ const CRUX_TASKS: Spec[] = [
   { slug: 'fe4-kanban',    title: 'Kanban board view',               phase: 'Frontend',   executor: 'llm',    status: 'todo',        duration_days: 2,   value_score: 70, deps: ['r3-tasks'] },
   { slug: 'fe4-graph',     title: 'Dependency graph view',           phase: 'Frontend',   executor: 'hybrid', status: 'todo',        duration_days: 1.5, value_score: 55, deps: ['r3-tasks'] },
   { slug: 't5-e2e',        title: 'End-to-end test suite',           phase: 'Quality',    executor: 'llm',    status: 'todo',        duration_days: 1,   value_score: 60, deps: ['fe4-kanban'] },
+  // Abandoned on purpose: without it no fixture exercises the dropped outline,
+  // and the one status carrying a dashed stroke would never appear in review.
+  { slug: 'x6-soap',       title: 'SOAP compatibility layer',        phase: 'API',        executor: 'auto',   status: 'dropped',     duration_days: 2,   value_score: 15, deps: ['r3-projects'] },
 ];
 
 function seedProject(name: string, type: 'code_repo' | 'research' | 'freelance', tasks: Spec[]) {

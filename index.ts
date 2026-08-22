@@ -1792,7 +1792,13 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
             actor:      e.actor,
             created_at: e.created_at,
           })),
-          agent_context: agentContext(projRoot, proj.type),
+          // repo_path, not projRoot: conventions must come from where the project
+          // actually lives, never from whatever directory the MCP server runs in.
+          agent_context: agentContext(projRoot, proj.type, {
+            repo_path:  proj.repo_path,
+            verify_cmd: proj.verify_cmd,
+            test_cmd:   proj.test_cmd,
+          }),
         });
       } catch (e: unknown) { return err((e as Error).message); }
     }
@@ -1826,7 +1832,11 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
           type:             match.type,
           run_env:          match.run_env,
           cwd_relinked:     hadCwdLink,
-          agent_context:    agentContext(projRoot, match.type),
+          agent_context:    agentContext(projRoot, match.type, {
+            repo_path:  match.repo_path,
+            verify_cmd: match.verify_cmd,
+            test_cmd:   match.test_cmd,
+          }),
         });
       } catch (e: unknown) { return err((e as Error).message); }
     }
@@ -1915,11 +1925,26 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
   );
 
   // ── UI server (background HTTP, port from ~/.crux/crux.json) ─────────────
-  startServer();
+  // Started here, so its lifetime is this MCP session's — see the shutdown below.
+  const uiServer = startServer();
 
   // ── Connect ────────────────────────────────────────────────────────────────
   const transport = new StdioTransport();
   await server.connect(transport);
+
+  // Closing stdin is how an MCP client shuts a server down, and connect()
+  // resolves at that EOF. Without the teardown below the process stayed alive
+  // anyway: the listening UI socket is a live handle, so the event loop never
+  // drained and every disconnected session leaked a process still holding the
+  // port. It only looked fine on a developer machine, where the port was
+  // usually already taken, listen() failed, and the process exited by accident.
+  //
+  // Handles are released rather than process.exit()-ed on purpose: an exit here
+  // would discard whatever response is still buffered in stdout. Letting the
+  // loop drain flushes it first.
+  uiServer.closeAllConnections?.();
+  uiServer.close();
+  closeDb();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

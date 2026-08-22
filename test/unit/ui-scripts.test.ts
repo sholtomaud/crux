@@ -71,8 +71,8 @@ describe('the service worker cache version tracks the assets it precaches', () =
    */
   const SW = readFileSync(join(UI_DIR, 'sw.js'), 'utf8');
 
-  // Recorded against CACHE = 'crux-v4'.
-  const PRECACHED_DIGEST = '9c038fb0f66ee62e';
+  // Recorded against CACHE = 'crux-v5'.
+  const PRECACHED_DIGEST = 'fb7f2acd75bdbfea';
 
   const staticList = (): string[] => {
     const m = SW.match(/const STATIC\s*=\s*\[([^\]]*)\]/);
