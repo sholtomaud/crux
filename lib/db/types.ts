@@ -11,7 +11,11 @@
 // instead of silently.
 export const PROJECT_TYPES   = ['code_repo', 'article', 'research', 'freelance', 'learning', 'personal'] as const;
 export const PROJECT_STATUSES = ['active', 'stalled', 'paused', 'done', 'dropped'] as const;
-export const TASK_STATUSES   = ['open', 'in-progress', 'blocked', 'done', 'dropped'] as const;
+// 'todo' rather than 'open': 'open' reads as "not closed", which says nothing
+// about whether the work is ready to start. See the rename migration in
+// lib/db/open.ts — this list is the single source the CHECK constraint,
+// the Zod enums and the UI all follow.
+export const TASK_STATUSES   = ['todo', 'in-progress', 'blocked', 'done', 'dropped'] as const;
 export const TASK_TYPES      = ['coding', 'writing', 'research', 'accounting', 'verification', 'design', 'other'] as const;
 export const TASK_EXECUTORS  = ['llm', 'human', 'hybrid', 'auto'] as const;
 export const ESTIMATED_BY_VALUES = ['human', 'claude', 'auto'] as const;
@@ -35,6 +39,12 @@ export type AdrStatus     = typeof ADR_STATUSES[number];
 
 export const TEST_RUN_STATUSES = ['pass', 'fail'] as const;
 export type TestRunStatus = typeof TEST_RUN_STATUSES[number];
+
+// ADR-010 / ADR-011: who made an LLM call, and how it ended.
+export const AGENT_ROLES  = ['refiner', 'engineer', 'reviewer', 'ask'] as const;
+export const RUN_OUTCOMES = ['ok', 'hold', 'error'] as const;
+export type AgentRole  = typeof AGENT_ROLES[number];
+export type RunOutcome = typeof RUN_OUTCOMES[number];
 
 export interface Project {
   id: string;
@@ -126,6 +136,31 @@ export interface AuditEntry {
   detail: string | null;
   actor: AuditActor;
   created_at: string;
+}
+
+/**
+ * One LLM invocation (ADR-010). Token and cost columns are nullable on
+ * purpose: a provider that reports no usage records NULL rather than a
+ * plausible-looking guess, so aggregates can report coverage instead of
+ * silently averaging over the runs that happened to be measured.
+ */
+export interface AgentRun {
+  id: number;
+  project_id: string | null;
+  task_id: number | null;
+  agent_id: string | null;
+  role: AgentRole;
+  step: string | null;
+  provider: string;
+  model: string | null;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_usd: number | null;
+  outcome: RunOutcome;
+  detail: string | null;
 }
 
 export interface Adr {

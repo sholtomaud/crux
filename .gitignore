@@ -14,3 +14,8 @@ dist/
 test/e2e/screenshots/
 test/e2e/.output/
 playwright-report/
+
+# Scratch and stray artifacts (not source)
+ui.zip
+temp.md
+stich/

@@ -263,8 +263,8 @@ function seedFromTasksMd(db: ReturnType<typeof openDb>, projectId: string, md: s
     if (!rowMatch) continue;
 
     const [, slug, title, status, depsRaw] = rowMatch;
-    const taskStatus: TaskStatus = (['open','in-progress','blocked','done','dropped'].includes(status.trim())
-      ? status.trim() : 'open') as TaskStatus;
+    const taskStatus: TaskStatus = (['todo','in-progress','blocked','done','dropped'].includes(status.trim())
+      ? status.trim() : 'todo') as TaskStatus;
 
     const existing = taskBySlug(db, projectId, slug);
     if (existing) { slugToId.set(slug, existing.id); continue; }
@@ -275,7 +275,7 @@ function seedFromTasksMd(db: ReturnType<typeof openDb>, projectId: string, md: s
       title: title.trim(),
       phase: currentPhase ?? undefined,
     });
-    if (taskStatus !== 'open') updateTaskStatus(db, projectId, slug.trim(), taskStatus);
+    if (taskStatus !== 'todo') updateTaskStatus(db, projectId, slug.trim(), taskStatus);
     slugToId.set(slug.trim(), task.id);
     seeded++;
 
@@ -316,7 +316,7 @@ function cmdStatus(): void {
   const s    = projectStatus(db, proj.id);
 
   console.log(`\n${proj.name} (${proj.type} · ${proj.status})`);
-  console.log(`Tasks: ${s.total} total · ${s.done} done · ${s.open} open · ${s.in_progress} in-progress · ${s.blocked} blocked\n`);
+  console.log(`Tasks: ${s.total} total · ${s.done} done · ${s.todo} todo · ${s.in_progress} in-progress · ${s.blocked} blocked\n`);
 
   if (s.next_unblocked.length > 0) {
     console.log('Next unblocked:');
@@ -477,7 +477,7 @@ function cmdTask(args: string[]): void {
     return;
   }
 
-  const statusMap: Record<string, TaskStatus> = { done: 'done', start: 'in-progress', block: 'blocked', drop: 'dropped', update: 'open' };
+  const statusMap: Record<string, TaskStatus> = { done: 'done', start: 'in-progress', block: 'blocked', drop: 'dropped', update: 'todo' };
   const newStatus = statusMap[sub];
   if (!newStatus) { console.error(`Unknown task sub-command: ${sub}`); process.exit(1); }
 
@@ -878,20 +878,20 @@ function cmdReady(): void {
   const proj  = getProject();
   const tasks = tasksByProject(db, proj.id);
   const blocked = tasks.filter(t => t.status === 'blocked');
-  const open    = tasks.filter(t => t.status === 'open' && t.is_critical);
+  const open    = tasks.filter(t => t.status === 'todo' && t.is_critical);
   const done    = tasks.filter(t => t.status === 'done').length;
   const total   = tasks.length;
 
   console.log(`\n${proj.name} — Release Readiness\n`);
   console.log(`Tasks done:     ${done}/${total}`);
   console.log(`Blocked:        ${blocked.length}`);
-  console.log(`Critical open:  ${open.length}`);
+  console.log(`Critical todo:  ${open.length}`);
 
   const go = blocked.length === 0 && open.length === 0 && done === total;
   console.log(`\nVerdict: ${go ? '✅ GO' : '🔴 NO-GO'}`);
   if (!go) {
     if (blocked.length > 0) console.log('  ✗ Blocked tasks:', blocked.map(t => t.slug).join(', '));
-    if (open.length > 0)    console.log('  ✗ Critical open:', open.map(t => t.slug).join(', '));
+    if (open.length > 0)    console.log('  ✗ Critical todo:', open.map(t => t.slug).join(', '));
   }
 }
 
@@ -952,7 +952,7 @@ function cmdContext(): void {
   } catch { /* cycle */ }
 
   const activeTasks = allTasks
-    .filter(t => t.status === 'open' || t.status === 'in-progress' || t.status === 'blocked')
+    .filter(t => t.status === 'todo' || t.status === 'in-progress' || t.status === 'blocked')
     .map(t => ({
       id: t.id, slug: t.slug, title: t.title,
       description:   t.description ? t.description.slice(0, 200) : null,
@@ -964,7 +964,7 @@ function cmdContext(): void {
 
   const out = {
     project:    { id: proj.id, name: proj.name, type: proj.type, status: proj.status, gh_repo: proj.gh_repo },
-    summary:    { total: allTasks.length, open: status.open, in_progress: status.in_progress, blocked: status.blocked, done: allTasks.filter(t => t.status === 'done').length, next_unblocked: status.next_unblocked, cpm: cpmSummary },
+    summary:    { total: allTasks.length, todo: status.todo, in_progress: status.in_progress, blocked: status.blocked, done: allTasks.filter(t => t.status === 'done').length, next_unblocked: status.next_unblocked, cpm: cpmSummary },
     active_tasks: activeTasks,
     adrs:       adrs.map(a => ({ number: a.number, title: a.title, status: a.status, decision: a.decision ? a.decision.slice(0, 300) : null })),
     recent_audit: audit.map(e => ({ event: e.event, detail: e.detail, actor: e.actor, created_at: e.created_at })),
@@ -988,7 +988,7 @@ function nextUnblockedTasks(db: ReturnType<typeof openDb>, projId: string, phase
 
   const open = tasks
     .filter(t => {
-      if (t.status !== 'open') return false;
+      if (t.status !== 'todo') return false;
       if (t.executor === 'human') return false;  // human tasks go in human_queue, not LLM queue
       if (phase && t.phase !== phase) return false;
       const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
@@ -1006,7 +1006,7 @@ function humanQueue(db: ReturnType<typeof openDb>, projId: string) {
   const doneIds = new Set(tasks.filter(t => t.status === 'done').map(t => t.id));
 
   return tasks.filter(t => {
-    if (t.status !== 'open' && t.status !== 'in-progress') return false;
+    if (t.status !== 'todo' && t.status !== 'in-progress') return false;
     if (t.executor !== 'human') return false;
     const preds = deps.filter(d => d.successor_id === t.id).map(d => d.predecessor_id);
     return preds.every(id => doneIds.has(id));
@@ -1058,7 +1058,7 @@ async function cmdAgent(args: string[]): Promise<void> {
     const stalled = stalledTasks(db, proj.id);
     if (stalled.length === 0) { console.log('No stalled tasks.'); return; }
     for (const t of stalled) {
-      updateTaskStatus(db, proj.id, t.slug, 'open');
+      updateTaskStatus(db, proj.id, t.slug, 'todo');
       logAudit(db, { project_id: proj.id, task_id: t.id, event: 'task.open', detail: 'reset from in-progress by --reset-stalled', actor: 'human' });
       console.log(`↺  ${t.slug} → open`);
     }
@@ -1542,7 +1542,7 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
         const proj  = requireProject();
         const tasks = tasksByProject(db, proj.id);
         const blocked = tasks.filter(t => t.status === 'blocked');
-        const critOpen = tasks.filter(t => t.status === 'open' && t.is_critical);
+        const critOpen = tasks.filter(t => t.status === 'todo' && t.is_critical);
         const done  = tasks.filter(t => t.status === 'done').length;
         return ok({ go: blocked.length === 0 && critOpen.length === 0 && done === tasks.length, done, total: tasks.length, blocked: blocked.map(t => t.slug), critical_open: critOpen.map(t => t.slug) });
       } catch (e: unknown) { return err((e as Error).message); }
@@ -1747,7 +1747,7 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
 
         // Open + in-progress tasks with predecessor/successor slugs and truncated description
         const activeTasks = allTasks
-          .filter(t => t.status === 'open' || t.status === 'in-progress' || t.status === 'blocked')
+          .filter(t => t.status === 'todo' || t.status === 'in-progress' || t.status === 'blocked')
           .map(t => ({
             id:            t.id,
             slug:          t.slug,
@@ -1772,7 +1772,7 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
           },
           summary: {
             total:           allTasks.length,
-            open:            status.open,
+            todo:            status.todo,
             in_progress:     status.in_progress,
             blocked:         status.blocked,
             done:            allTasks.filter(t => t.status === 'done').length,

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     title            TEXT NOT NULL,
     description      TEXT,
     phase            TEXT,
-    status           TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in-progress','blocked','done','dropped')),
+    status           TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in-progress','blocked','done','dropped')),
     priority         INTEGER NOT NULL DEFAULT 0,
     duration_days    REAL,
     actual_days      REAL,              -- actual time spent, recorded on completion
@@ -112,6 +112,27 @@ CREATE TABLE IF NOT EXISTS audit (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ADR-010: one row per LLM invocation. Token/cost columns are nullable by
+-- design — a provider that reports no usage records NULL, never an estimate.
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    task_id       INTEGER REFERENCES tasks(id) ON DELETE SET NULL,  -- spend survives task deletion
+    agent_id      TEXT,               -- agents(id) once ADR-011 lands
+    role          TEXT NOT NULL CHECK(role IN ('refiner','engineer','reviewer','ask')),
+    step          TEXT,               -- workflow.ts step name, NULL for free-form loops
+    provider      TEXT NOT NULL,
+    model         TEXT,               -- model the provider actually served
+    started_at    TEXT NOT NULL,
+    completed_at  TEXT NOT NULL,
+    duration_ms   INTEGER,
+    input_tokens  INTEGER,            -- NULL = provider reported no usage
+    output_tokens INTEGER,
+    cost_usd      REAL,               -- NULL = cost unknown, 0 = local inference
+    outcome       TEXT NOT NULL CHECK(outcome IN ('ok','hold','error')),
+    detail        TEXT
+);
+
 CREATE TABLE IF NOT EXISTS adrs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -137,3 +158,4 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_proj   ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_proj      ON audit(project_id);
 CREATE INDEX IF NOT EXISTS idx_test_runs_proj  ON test_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_task  ON agent_runs(project_id, task_id);

@@ -171,7 +171,7 @@ export async function syncToSheets(db: DatabaseSync, project: Project): Promise<
     ['Status', project.status],
     ['Total tasks', tasks.length],
     ['Done', tasks.filter(t => t.status === 'done').length],
-    ['Open', tasks.filter(t => t.status === 'open').length],
+    ['Todo', tasks.filter(t => t.status === 'todo').length],
     ['Hours invested', hours.toFixed(1)],
     ['Revenue (AUD)', roi.revenue.toFixed(2)],
     ['Cost (AUD)', roi.cost.toFixed(2)],

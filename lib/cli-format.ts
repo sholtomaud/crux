@@ -41,7 +41,7 @@ function fileLine(entry: unknown): string {
 }
 
 const STATUS_MARK: Record<Task['status'], string> = {
-  'done': '✓', 'in-progress': '▸', 'blocked': '✗', 'dropped': '·', 'open': '·',
+  'done': '✓', 'in-progress': '▸', 'blocked': '✗', 'dropped': '·', 'todo': '·',
 };
 
 function refLine(t: TaskRef): string {

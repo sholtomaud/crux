@@ -41,7 +41,7 @@ function seedTask(db: DatabaseSync, projectId: string, slug: string): number {
 function fakeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 1, project_id: 'p', slug: 'p1-thing', title: 'Do the thing',
-    description: null, phase: null, status: 'open', priority: 3,
+    description: null, phase: null, status: 'todo', priority: 3,
     duration_days: null, actual_days: null, estimated_by: 'human',
     early_start: null, early_finish: null, late_start: null, late_finish: null,
     float_days: null, is_critical: 0, gh_issue_number: null, worktree_path: null,

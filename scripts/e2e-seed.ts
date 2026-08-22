@@ -57,11 +57,11 @@ const CRUX_TASKS: Spec[] = [
   { slug: 'd1-migrations', title: 'Idempotent migration runner',     phase: 'Data',       executor: 'llm',    status: 'done',        duration_days: 1,   value_score: 70, deps: ['d1-schema'] },
   { slug: 'a2-jwt',        title: 'Token issuing and refresh',       phase: 'Auth',       executor: 'hybrid', status: 'in-progress', duration_days: 2,   value_score: 90, deps: ['d1-migrations'] },
   { slug: 'a2-rbac',       title: 'Role-based access control',       phase: 'Auth',       executor: 'human',  status: 'blocked',     duration_days: 1.5, value_score: 75, deps: ['a2-jwt'] },
-  { slug: 'r3-projects',   title: 'Projects REST resource',          phase: 'API',        executor: 'llm',    status: 'open',        duration_days: 1,   value_score: 65, deps: ['a2-rbac'] },
-  { slug: 'r3-tasks',      title: 'Tasks REST resource',             phase: 'API',        executor: 'llm',    status: 'open',        duration_days: 1.5, value_score: 85, deps: ['r3-projects'] },
-  { slug: 'fe4-kanban',    title: 'Kanban board view',               phase: 'Frontend',   executor: 'llm',    status: 'open',        duration_days: 2,   value_score: 70, deps: ['r3-tasks'] },
-  { slug: 'fe4-graph',     title: 'Dependency graph view',           phase: 'Frontend',   executor: 'hybrid', status: 'open',        duration_days: 1.5, value_score: 55, deps: ['r3-tasks'] },
-  { slug: 't5-e2e',        title: 'End-to-end test suite',           phase: 'Quality',    executor: 'llm',    status: 'open',        duration_days: 1,   value_score: 60, deps: ['fe4-kanban'] },
+  { slug: 'r3-projects',   title: 'Projects REST resource',          phase: 'API',        executor: 'llm',    status: 'todo',        duration_days: 1,   value_score: 65, deps: ['a2-rbac'] },
+  { slug: 'r3-tasks',      title: 'Tasks REST resource',             phase: 'API',        executor: 'llm',    status: 'todo',        duration_days: 1.5, value_score: 85, deps: ['r3-projects'] },
+  { slug: 'fe4-kanban',    title: 'Kanban board view',               phase: 'Frontend',   executor: 'llm',    status: 'todo',        duration_days: 2,   value_score: 70, deps: ['r3-tasks'] },
+  { slug: 'fe4-graph',     title: 'Dependency graph view',           phase: 'Frontend',   executor: 'hybrid', status: 'todo',        duration_days: 1.5, value_score: 55, deps: ['r3-tasks'] },
+  { slug: 't5-e2e',        title: 'End-to-end test suite',           phase: 'Quality',    executor: 'llm',    status: 'todo',        duration_days: 1,   value_score: 60, deps: ['fe4-kanban'] },
 ];
 
 function seedProject(name: string, type: 'code_repo' | 'research' | 'freelance', tasks: Spec[]) {
@@ -76,7 +76,7 @@ function seedProject(name: string, type: 'code_repo' | 'research' | 'freelance',
       files_affected: ['lib/example.ts'],
     });
     ids.set(t.slug, task.id);
-    if (t.status !== 'open') updateTaskStatus(db, project.id, t.slug, t.status);
+    if (t.status !== 'todo') updateTaskStatus(db, project.id, t.slug, t.status);
   }
   for (const t of tasks) {
     for (const dep of t.deps ?? []) addDependency(db, ids.get(dep)!, ids.get(t.slug)!);
@@ -88,7 +88,7 @@ const main = seedProject('Atlas Platform', 'code_repo', CRUX_TASKS);
 
 seedProject('Quarterly Report', 'research', [
   { slug: 'q1-outline', title: 'Draft the outline',   phase: 'Writing', executor: 'human', status: 'done', duration_days: 0.5, value_score: 40 },
-  { slug: 'q1-figures', title: 'Produce the figures', phase: 'Writing', executor: 'llm',   status: 'open', duration_days: 1,   value_score: 55, deps: ['q1-outline'] },
+  { slug: 'q1-figures', title: 'Produce the figures', phase: 'Writing', executor: 'llm',   status: 'todo', duration_days: 1,   value_score: 55, deps: ['q1-outline'] },
 ]);
 
 const paused = seedProject('Client Retainer', 'freelance', [

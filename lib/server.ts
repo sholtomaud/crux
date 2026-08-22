@@ -25,10 +25,15 @@ import {
   openDb, allProjects, tasksByProject, dependenciesByProject,
   roiSummary, totalHours, projectStatus, firstRevenueAt,
   taskBySlug, updateTaskStatus, projectById, updateProjectStatus, logAudit,
-  activeSession, startSession, endSession,
-  TASK_STATUSES, PROJECT_STATUSES,
+  activeSession, startSession, endSession, updateTaskFields,
+  TASK_STATUSES, PROJECT_STATUSES, TASK_TYPES, TASK_EXECUTORS,
 } from './db.ts';
-import type { TaskStatus, ProjectStatus } from './db.ts';
+import type {
+  TaskStatus, ProjectStatus, TaskType, TaskExecutor,
+  TaskFieldPatch, UpdatableTaskField,
+} from './db.ts';
+import { applyTaskStatus } from './task-transition.ts';
+import type { GuardFailure } from './guards.ts';
 import { computeCpm } from './cpm.ts';
 import type { CpmNode, CpmEdge } from './cpm.ts';
 import { UI_ASSETS } from './ui-assets.ts';
@@ -66,8 +71,19 @@ function apiOverview(db: DatabaseSync, res: http.ServerResponse): void {
     const tasks = tasksByProject(db, p.id);
     const roi   = roiSummary(db, p.id);
     const hours = totalHours(db, p.id);
-    const nextTask = projectStatus(db, p.id).next_unblocked[0] ?? null;
-    return { ...p, task_count: tasks.length, done_count: tasks.filter(t => t.status === 'done').length, roi, hours, next_task: nextTask, first_revenue_at: firstRevenueAt(db, p.id) };
+    const status   = projectStatus(db, p.id);
+    const nextTask = status.next_unblocked[0] ?? null;
+    // A null next_task has two opposite meanings — nothing left to do, or
+    // everything left is gated. blocked_by is what tells them apart.
+    return {
+      ...p,
+      task_count: tasks.length,
+      done_count: tasks.filter(t => t.status === 'done').length,
+      roi, hours,
+      next_task: nextTask,
+      blocked_by: status.blocked_by,
+      first_revenue_at: firstRevenueAt(db, p.id),
+    };
   });
   json(res, data);
 }
@@ -109,7 +125,7 @@ function apiRoi(db: DatabaseSync, res: http.ServerResponse): void {
 }
 
 function apiDbTable(db: DatabaseSync, table: string, res: http.ServerResponse): void {
-  const allowed = ['projects', 'tasks', 'dependencies', 'sessions', 'roi_records', 'test_runs', 'audit', 'adrs', 'task_adrs'];
+  const allowed = ['projects', 'tasks', 'dependencies', 'sessions', 'roi_records', 'test_runs', 'audit', 'adrs', 'task_adrs', 'agent_runs'];
   if (!allowed.includes(table)) { json(res, { error: 'table not allowed' }, 403); return; }
   const rows = db.prepare(`SELECT * FROM ${table} LIMIT 500`).all();
   json(res, rows);
@@ -125,9 +141,117 @@ export function updateTaskStatusHandler(db: DatabaseSync, projectId: string, slu
   }
   const task = taskBySlug(db, projectId, slug);
   if (!task) return { status: 404, body: { error: 'task not found' } };
-  updateTaskStatus(db, projectId, slug, status as TaskStatus);
+  const transition = applyTaskStatus(db, projectId, slug, status as TaskStatus, { actor: 'human' });
+  if (!transition.applied) return { status: 409, body: { error: transition.blocked } };
   logAudit(db, { project_id: projectId, task_id: task.id, event: `task.${status}`, actor: 'human' });
-  return { status: 200, body: { slug, status } };
+  return { status: 200, body: { slug, status, ...(transition.warnings.length ? { guard_warnings: transition.warnings } : {}) } };
+}
+
+/**
+ * Full task edit for the detail panel (PATCH /api/task/:projectId/:slug).
+ *
+ * Three rules make this safe to point a form at:
+ *   1. Only UPDATABLE_TASK_FIELDS and `status` are read from the body; anything
+ *      else is dropped silently, so a client that PATCHes back a whole task row
+ *      it just fetched does the obvious right thing instead of erroring.
+ *   2. Everything is validated before anything is written.
+ *   3. Status still goes through applyTaskStatus, so ADR-012 guards fire here
+ *      exactly as they do for the CLI and MCP.
+ */
+export function updateTaskHandler(db: DatabaseSync, projectId: string, slug: string, body: unknown): ApiResult {
+  if (typeof body !== 'object' || body === null) {
+    return { status: 400, body: { error: 'body must be a JSON object' } };
+  }
+  const patch = body as Record<string, unknown>;
+  const task  = taskBySlug(db, projectId, slug);
+  if (!task) return { status: 404, body: { error: 'task not found' } };
+
+  const bad = (field: string, why: string): ApiResult =>
+    ({ status: 400, body: { error: `${field}: ${why}`, field } });
+
+  const fields: TaskFieldPatch = {};
+
+  if (patch.title !== undefined) {
+    if (typeof patch.title !== 'string' || patch.title.trim() === '') return bad('title', 'must be a non-empty string');
+    fields.title = patch.title.trim();
+  }
+  // Nullable free text: an empty string clears the column rather than storing
+  // '', so "I deleted the description" and "there was never one" stay one state.
+  for (const f of ['description', 'phase', 'acceptance_criteria'] as const) {
+    if (patch[f] === undefined) continue;
+    if (patch[f] !== null && typeof patch[f] !== 'string') return bad(f, 'must be a string or null');
+    const v = patch[f] === null ? null : String(patch[f]).trim();
+    fields[f] = v === '' ? null : v;
+  }
+  const num = (
+    f: 'priority' | 'duration_days' | 'value_score',
+    opts: { min: number; max: number; integer?: boolean; exclusiveMin?: boolean; nullable?: boolean },
+  ): ApiResult | null => {
+    if (patch[f] === undefined) return null;
+    const v = patch[f];
+    // Clearing a number field sends null. Only columns the schema allows to be
+    // NULL may take it; priority is NOT NULL, so emptying it is an error.
+    if (v === null) {
+      if (!opts.nullable) return bad(f, 'cannot be cleared');
+      fields[f] = null;
+      return null;
+    }
+    if (typeof v !== 'number' || !Number.isFinite(v)) return bad(f, 'must be a finite number');
+    if (opts.integer && !Number.isInteger(v)) return bad(f, 'must be a whole number');
+    if (opts.exclusiveMin ? v <= opts.min : v < opts.min) return bad(f, `must be greater than ${opts.exclusiveMin ? opts.min : `or equal to ${opts.min}`}`);
+    if (v > opts.max) return bad(f, `must be at most ${opts.max}`);
+    fields[f] = v;
+    return null;
+  };
+  // duration_days excludes 0: taskWsjf and the CPM float pass both divide by it.
+  for (const e of [
+    num('priority',      { min: 0, max: 100, integer: true }),
+    num('value_score',   { min: 0, max: 100, nullable: true }),
+    num('duration_days', { min: 0, max: 3650, exclusiveMin: true, nullable: true }),
+  ]) {
+    if (e) return e;
+  }
+  if (patch.task_type !== undefined) {
+    if (typeof patch.task_type !== 'string' || !TASK_TYPES.includes(patch.task_type as TaskType)) return bad('task_type', `must be one of ${TASK_TYPES.join(', ')}`);
+    fields.task_type = patch.task_type;
+  }
+  if (patch.executor !== undefined) {
+    if (typeof patch.executor !== 'string' || !TASK_EXECUTORS.includes(patch.executor as TaskExecutor)) return bad('executor', `must be one of ${TASK_EXECUTORS.join(', ')}`);
+    fields.executor = patch.executor;
+  }
+  let nextStatus: TaskStatus | null = null;
+  if (patch.status !== undefined) {
+    if (typeof patch.status !== 'string' || !TASK_STATUSES.includes(patch.status as TaskStatus)) return bad('status', `must be one of ${TASK_STATUSES.join(', ')}`);
+    if (patch.status !== task.status) nextStatus = patch.status as TaskStatus;
+  }
+
+  // Drop no-op writes so the audit detail names what genuinely moved.
+  for (const key of Object.keys(fields) as UpdatableTaskField[]) {
+    if (fields[key] === (task[key] ?? null)) delete fields[key];
+  }
+
+  // Status first, so a blocked transition aborts before any other write.
+  let warnings: GuardFailure[] = [];
+  if (nextStatus) {
+    const transition = applyTaskStatus(db, projectId, slug, nextStatus, { actor: 'human' });
+    if (!transition.applied) return { status: 409, body: { error: transition.blocked, field: 'status' } };
+    warnings = transition.warnings;
+  }
+  const changed = updateTaskFields(db, task.id, fields);
+
+  const changedNames = [...(nextStatus ? ['status'] : []), ...changed];
+  if (changedNames.length > 0) {
+    logAudit(db, { project_id: projectId, task_id: task.id, event: 'task.update', detail: changedNames.join(', '), actor: 'human' });
+  }
+
+  return {
+    status: 200,
+    body: {
+      task: taskBySlug(db, projectId, slug),
+      changed: changedNames,
+      ...(warnings.length ? { guard_warnings: warnings } : {}),
+    },
+  };
 }
 
 export function sessionStartHandler(db: DatabaseSync, projectId: string): ApiResult {
@@ -182,6 +306,16 @@ export function startServer(port = readCruxConfig().ui_port, host = '127.0.0.1')
 
     // CORS headers (localhost only)
     res.setHeader('Access-Control-Allow-Origin', `http://${host}:${port}`);
+
+    // Full task edit (PATCH) — the detail panel's save path
+    if (req.method === 'PATCH') {
+      const m = path.match(/^\/api\/task\/([^/]+)\/([^/]+)$/);
+      if (m) {
+        const body   = await readJsonBody(req);
+        const result = updateTaskHandler(db, decodeURIComponent(m[1]), decodeURIComponent(m[2]), body);
+        return json(res, result.body, result.status);
+      }
+    }
 
     // Write routes (POST)
     if (req.method === 'POST') {

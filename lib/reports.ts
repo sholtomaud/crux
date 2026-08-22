@@ -43,7 +43,7 @@ export function reportTasks(db: DatabaseSync, project: Project): string {
   // Summary counts
   const byStatus = (s: string) => tasks.filter(t => t.status === s).length;
   lines.push(
-    `**Total:** ${tasks.length} | **Done:** ${byStatus('done')} | **Open:** ${byStatus('open')} | **In Progress:** ${byStatus('in-progress')} | **Blocked:** ${byStatus('blocked')}`,
+    `**Total:** ${tasks.length} | **Done:** ${byStatus('done')} | **Todo:** ${byStatus('todo')} | **In Progress:** ${byStatus('in-progress')} | **Blocked:** ${byStatus('blocked')}`,
     '',
   );
 
@@ -103,7 +103,7 @@ export function reportStatus(db: DatabaseSync, project: Project): string {
     `|---|---|`,
     `| Done | ${tasks.filter(t => t.status === 'done').length} |`,
     `| In Progress | ${tasks.filter(t => t.status === 'in-progress').length} |`,
-    `| Open | ${tasks.filter(t => t.status === 'open').length} |`,
+    `| Todo | ${tasks.filter(t => t.status === 'todo').length} |`,
     `| Blocked | ${tasks.filter(t => t.status === 'blocked').length} |`,
     `| Total | ${tasks.length} |`,
     '',
@@ -286,7 +286,7 @@ export function reportOverview(db: DatabaseSync, baselineRate: number = 0): stri
 
 function statusBadge(status: Task['status']): string {
   const map: Record<string, string> = {
-    'open':        '○ open',
+    'todo':        '○ todo',
     'in-progress': '◑ in-progress',
     'blocked':     '✗ blocked',
     'done':        '✓ done',

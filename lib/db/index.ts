@@ -14,6 +14,7 @@ export * from './dependencies.ts';
 export * from './sessions.ts';
 export * from './roi.ts';
 export * from './test-runs.ts';
+export * from './agent-runs.ts';
 export * from './audit.ts';
 export * from './adrs.ts';
 export * from './status.ts';

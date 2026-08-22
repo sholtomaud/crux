@@ -125,7 +125,7 @@ describe('tasks', () => {
     const tid = seedTask(db, pid, 'setup', 'Setup project');
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(tid) as { slug: string; status: string; is_critical: number };
     assert.equal(row.slug, 'setup');
-    assert.equal(row.status, 'open');
+    assert.equal(row.status, 'todo');
     assert.equal(row.is_critical, 0);
     db.close();
   });
