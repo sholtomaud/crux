@@ -18,6 +18,11 @@ export function openDb(): DatabaseSync {
   if (_db) return _db;
   mkdirSync(CRUX_DIR, { recursive: true });
   _db = new DatabaseSync(DB_PATH);
+  // WAL allows one writer at a time. Under ADR-011's parallel agents that means
+  // concurrent writers will collide, and without a timeout the loser fails
+  // immediately with SQLITE_BUSY instead of waiting out a millisecond-scale
+  // write. Set before any statement runs.
+  _db.exec('PRAGMA busy_timeout = 5000;');
   applySchema(_db);
   applyMigrations(_db);
   return _db;
@@ -30,6 +35,66 @@ export function closeDb(): void {
 function applySchema(db: DatabaseSync): void {
   for (const stmt of SCHEMA_SQL.split(';').map((s: string) => s.trim()).filter(Boolean)) {
     db.exec(stmt + ';');
+  }
+}
+
+/**
+ * Rebuilds `tasks` so its status CHECK accepts 'todo' instead of 'open', and
+ * converts existing rows. Idempotent: a database whose constraint already
+ * mentions 'todo' is left alone.
+ *
+ * Unlike every other migration here this cannot be an ALTER: the value lives
+ * inside a CHECK constraint, and SQLite has no way to modify a constraint in
+ * place. That leaves the documented table-rebuild procedure.
+ *
+ * The new table definition is lifted out of SCHEMA_SQL rather than retyped —
+ * two copies of a 25-column table would drift, and the copy that silently wins
+ * is whichever one a rebuild happens to use. Columns are copied by name, never
+ * with SELECT *: a database that grew a column through one of the ALTERs above
+ * has it appended at the end, so its column *order* no longer matches
+ * schema.sql even though the set does.
+ */
+function renameOpenStatusToTodo(db: DatabaseSync): void {
+  const existing = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'"
+  ).get() as { sql: string } | undefined;
+  if (!existing || existing.sql.includes("'todo'")) return;
+
+  const body = SCHEMA_SQL.match(/CREATE TABLE IF NOT EXISTS tasks \(([\s\S]*?)\n\);/);
+  if (!body) throw new Error('cannot rebuild tasks: no CREATE TABLE tasks in schema.sql');
+
+  const nameOf = (rows: unknown[]) => (rows as Array<{ name: string }>).map(r => r.name);
+  const oldCols = new Set(nameOf(db.prepare('PRAGMA table_info(tasks)').all()));
+
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    db.exec(`CREATE TABLE tasks_new (${body[1]}\n);`);
+    const cols = nameOf(db.prepare('PRAGMA table_info(tasks_new)').all()).filter(c => oldCols.has(c));
+    const list = cols.join(', ');
+
+    // Convert inside the copy, not with an UPDATE afterwards: tasks_new already
+    // carries the new CHECK, so an 'open' row would be rejected on the way in
+    // and never live long enough to be updated.
+    const selectList = cols
+      .map(c => (c === 'status' ? "CASE WHEN status = 'open' THEN 'todo' ELSE status END" : c))
+      .join(', ');
+    db.exec(`INSERT INTO tasks_new (${list}) SELECT ${selectList} FROM tasks;`);
+    db.exec('DROP TABLE tasks;');
+    db.exec('ALTER TABLE tasks_new RENAME TO tasks;');
+    // Indexes belonged to the dropped table and went with it.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(project_id, status);');
+
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    if (violations.length > 0) throw new Error(`tasks rebuild left ${violations.length} FK violations`);
+
+    db.exec('COMMIT;');
+  } catch (err) {
+    try { db.exec('ROLLBACK;'); } catch { /* already rolled back */ }
+    throw err;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON;');
   }
 }
 
@@ -105,6 +170,10 @@ export function applyMigrations(db: DatabaseSync): void {
   if (!sessionCols.includes('container_name')) {
     db.exec('ALTER TABLE sessions ADD COLUMN container_name TEXT;');
   }
+
+  // 'open' -> 'todo'. Runs last, after the ALTERs above have brought every
+  // column into existence, so the rebuild copies a complete table.
+  renameOpenStatusToTodo(db);
 
   // global_config table (idempotent — CREATE IF NOT EXISTS handles it)
   db.exec(`

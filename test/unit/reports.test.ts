@@ -35,7 +35,7 @@ function seedTask(db: DatabaseSync, projectId: string, slug: string, opts: { tit
     INSERT INTO tasks (project_id, slug, title, status, phase, duration_days, actual_days, estimated_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    projectId, slug, opts.title ?? slug, opts.status ?? 'open', opts.phase ?? null, opts.duration_days ?? null,
+    projectId, slug, opts.title ?? slug, opts.status ?? 'todo', opts.phase ?? null, opts.duration_days ?? null,
     opts.actual_days ?? null, opts.estimated_by ?? 'human',
   );
   return db.prepare('SELECT id FROM tasks WHERE project_id = ? AND slug = ?').get(projectId, slug) as { id: number };
@@ -87,11 +87,11 @@ describe('reportTasks', () => {
     const db = makeDb();
     const p  = seedProject(db);
     seedTask(db, p.id, 't1', { status: 'done' });
-    seedTask(db, p.id, 't2', { status: 'open' });
+    seedTask(db, p.id, 't2', { status: 'todo' });
     seedTask(db, p.id, 't3', { status: 'blocked' });
     const md = reportTasks(db, p as any);
     assert.ok(md.includes('Done:** 1'));
-    assert.ok(md.includes('Open:** 1'));
+    assert.ok(md.includes('Todo:** 1'));
     assert.ok(md.includes('Blocked:** 1'));
     db.close();
   });

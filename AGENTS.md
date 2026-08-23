@@ -50,8 +50,13 @@ bare `npm`/`node` on the host.
 - `test/integration/*.test.ts` — exercises real `gh` CLI / GitHub API calls
   (slower, can take seconds per test). Run via `make test-agent` /
   `npm run test:agent`.
-- `test/e2e/*.spec.ts` — Playwright, excluded from `tsconfig.json` and the
-  typecheck/lint globs.
+- `test/e2e/*.spec.ts` — Playwright, run via `make test-e2e`. Playwright starts
+  the server itself and boots the *bundled* `dist/crux.cjs` against a throwaway
+  `HOME` seeded by `scripts/e2e-seed.ts`, so e2e exercises the artifact that
+  ships and never touches your real `~/.crux/crux.db`. It also writes theme
+  screenshots to `test/e2e/screenshots/`. These specs are typechecked like
+  everything else — they were excluded from `tsconfig.json` only while
+  `@playwright/test` was missing from `devDependencies`.
 - For behavior changes: write or extend a test in the appropriate tier
   first, then implement. When `tsgo`/`tsc` flags a type error, treat it as a
   signal, not busywork — if it points at a real logic gap, add a failing

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f0f0f">
   <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/tokens.css">
+  <script src="/theme.js"></script>
   <title>crux — Project</title>
   <style>
     .breadcrumb { font-size: 0.75rem; color: var(--color-text-dimmer); margin-bottom: 0.3rem; }
@@ -17,19 +19,19 @@
 
     .session-widget { display: flex; align-items: center; gap: 0.7rem; }
     .session-btn { font: inherit; font-size: 0.78rem; border-radius: var(--radius-sm); padding: 0.4em 0.9em; cursor: pointer; display: inline-flex; align-items: center; gap: 0.4em; }
-    .session-btn.start { background: #1a3a2a; color: var(--color-primary); border: 1px solid #2a5a3a; }
-    .session-btn.stop  { background: #3a1a1a; color: var(--color-danger); border: 1px solid #5a2a2a; }
-    .session-timer { font-family: monospace; font-size: 0.85rem; color: var(--color-text); }
+    .session-btn.start { background: var(--color-success-surface); color: var(--color-primary); border: 1px solid var(--color-success-border); }
+    .session-btn.stop  { background: var(--color-danger-surface); color: var(--color-danger); border: 1px solid var(--color-danger-border); }
+    .session-timer { font-family: var(--font-mono); font-size: 0.85rem; color: var(--color-text); }
 
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: var(--space-section-gap); }
 
-    .critical-path { padding: 0.75rem 1rem; background: var(--color-surface-container); border-radius: var(--radius); font-size: 0.82rem; color: #ccc; margin-bottom: 1.25rem; }
+    .critical-path { padding: 0.75rem 1rem; background: var(--color-surface-container); border-radius: var(--radius); font-size: 0.82rem; color: var(--color-text-muted); margin-bottom: 1.25rem; }
     .critical-path .slug { color: var(--color-danger); font-weight: 600; }
 
     .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-border); margin-bottom: 1.25rem; }
     .tab-link { padding: 0.55rem 1rem; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.03em;
                 color: var(--color-text-dim); border-bottom: 2px solid transparent; }
-    .tab-link.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+    .tab-link.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
     .tab-link:hover { text-decoration: none; color: var(--color-text); }
 
     .task-toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
@@ -46,18 +48,12 @@
     .task-card.critical { border-left-color: var(--color-danger); }
     .task-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem; }
     .task-slug { font-size: 0.7rem; color: var(--color-text-dimmer); }
-    .wsjf-chip { font-size: 0.65rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: var(--radius-sm); background: rgba(167,139,250,0.12); color: #a78bfa; border: 1px solid rgba(167,139,250,0.3); white-space: nowrap; }
+    .wsjf-chip { font-size: 0.65rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: var(--radius-sm); background: var(--color-wsjf-surface); color: var(--color-wsjf); border: 1px solid var(--color-wsjf-border); white-space: nowrap; }
     .task-card-title { font-size: 0.88rem; color: var(--color-text); margin-bottom: 0.6rem; }
     .task-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--color-border); }
-    .task-card-detail { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--color-border); font-size: 0.78rem; }
-    .deps { display: flex; flex-direction: column; gap: 0.35rem; }
-    .dep-label { color: var(--color-text-dim); margin-right: 0.5rem; }
-    .dep-empty { color: var(--color-text-dimmer); }
-    .depchip { display: inline-block; background: var(--color-bg); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
-               padding: 0.1em 0.5em; font-family: monospace; font-size: 0.75rem; color: #ccc; margin-right: 0.35rem; }
 
     .roi-table-wrap { margin-top: var(--space-section-gap); }
-    h2 { font-size: 1rem; color: #aaa; margin: 0 0 0.75rem; }
+    h2 { font-size: 1rem; color: var(--color-text-subtle); margin: 0 0 0.75rem; }
   </style>
 </head>
 <body>
@@ -69,9 +65,10 @@
   <script>
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
     const id = new URLSearchParams(location.search).get('id');
-    const TASK_STATUSES = ['open', 'in-progress', 'blocked', 'done', 'dropped'];
+    // TASK_STATUSES comes from app.js — the panel and the board must offer the
+    // same set, and a second `const` of that name here would be a SyntaxError.
     const BOARD_STATUSES = [
-      { key: 'open',        label: 'Open' },
+      { key: 'todo',        label: 'Todo' },
       { key: 'in-progress', label: 'In Progress' },
       { key: 'blocked',     label: 'Blocked' },
       { key: 'done',        label: 'Done' },
@@ -89,9 +86,28 @@
       } catch (e) { alert(`Failed to update status: ${e.message}`); loadAndRender(); }
     }
 
-    function toggleDetail(taskId) {
-      const row = document.getElementById(`detail-${taskId}`);
-      if (row) row.hidden = !row.hidden;
+    // Opened from an inline onclick, so it re-reads cachedData by id rather than
+    // closing over a task object that a reload would have already replaced.
+    function openTaskFromCard(taskId) {
+      const task = cachedData?.tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      const slugById = new Map(cachedData.tasks.map(t => [t.id, t.slug]));
+      const opened = openTaskPanel(id, task, cachedCpm?.nodes.find(n => n.id === taskId), {
+        neighbours: {
+          predecessors: cachedData.deps.filter(d => d.successor_id === taskId).map(d => slugById.get(d.predecessor_id)).filter(Boolean),
+          successors:   cachedData.deps.filter(d => d.predecessor_id === taskId).map(d => slugById.get(d.successor_id)).filter(Boolean),
+        },
+        // Refetch so a status change moves the card to its new column and the
+        // stat rollup above the board stays honest.
+        onSaved: () => loadAndRender(),
+      });
+
+      // Only after the panel agreed to switch — see the note in graph.html.
+      if (opened) {
+        document.querySelectorAll('.task-card.tp-selected').forEach(c => c.classList.remove('tp-selected'));
+        document.querySelector(`.task-card[data-id="${taskId}"]`)?.classList.add('tp-selected');
+      }
     }
 
     let sessionTimerInterval = null;
@@ -157,7 +173,7 @@
       const stats = [
         { value: tasks.length,           label: 'Total tasks' },
         { value: status.done,            label: 'Done' },
-        { value: status.open,            label: 'Open' },
+        { value: status.todo,            label: 'Todo' },
         { value: status.in_progress,     label: 'In Progress' },
         { value: status.blocked,         label: 'Blocked' },
         { value: `${hours.toFixed(1)}h`, label: 'Hours' },
@@ -179,7 +195,7 @@
       const taskCard = (t) => {
         const wsjf = wsjfOf(t);
         return `
-          <div class="card task-card ${criticalIds.has(t.id) ? 'critical' : ''}" onclick="toggleDetail(${t.id})">
+          <div class="card task-card ${criticalIds.has(t.id) ? 'critical' : ''}" data-id="${t.id}" onclick="openTaskFromCard(${t.id})">
             <div class="task-card-top">
               <span class="task-slug"><code>${t.slug}</code></span>
               ${wsjf !== null ? `<span class="wsjf-chip">WSJF ${wsjf}</span>` : ''}
@@ -190,10 +206,6 @@
               <select class="status-select" onclick="event.stopPropagation()" onchange="changeTaskStatus('${t.slug}', this.value)">
                 ${TASK_STATUSES.map(s => `<option value="${s}" ${s === t.status ? 'selected' : ''}>${s}</option>`).join('')}
               </select>
-            </div>
-            <div class="task-card-detail" id="detail-${t.id}" hidden onclick="event.stopPropagation()">
-              <div class="deps"><div><span class="dep-label">Predecessors:</span>${depChips(predMap[t.id])}</div>
-              <div><span class="dep-label">Successors:</span>${depChips(succMap[t.id])}</div></div>
             </div>
           </div>`;
       };
@@ -276,7 +288,7 @@
       }
     }
 
-    (async () => { renderAgentPanel(); await renderSidebar('project', id); loadAndRender(); })();
+    (async () => { renderAgentPanel(); renderTaskPanel(); await renderSidebar('project', id); loadAndRender(); })();
   </script>
 </body>
 </html>

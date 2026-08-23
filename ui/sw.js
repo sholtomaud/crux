@@ -1,7 +1,18 @@
 // crux service worker — cache-first for static assets, network-first for /api/*
 
-const CACHE  = 'crux-v2';
-const STATIC = ['/', '/app.js', '/manifest.json', '/sw.js', '/icon.svg'];
+// Bumped to v3 when tokens.css was introduced — a stale v2 cache would serve
+// pages whose stylesheet link 404s, leaving the UI unstyled.
+// Bump this on EVERY change to a precached asset below. The fetch handler is
+// cache-first for them, so a stale cache is served forever otherwise — there is
+// no revalidation and no max-age to save you.
+//
+// v5: status palette, the task detail panel, and the 'todo' rename. graph.html
+//     is NOT precached, so it arrives fresh and would reference
+//     --color-status-* against a v4 tokens.css that never heard of them —
+//     every node outline silently falling back to grey. New page, old
+//     stylesheet is the failure mode this bump exists to prevent.
+const CACHE  = 'crux-v5';
+const STATIC = ['/', '/tokens.css', '/theme.js', '/app.js', '/manifest.json', '/sw.js', '/icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(

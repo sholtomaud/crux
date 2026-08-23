@@ -1,0 +1,346 @@
+/**
+ * ui/tokens.css — the single source of truth for the crux palette.
+ *
+ * Loaded by every page, including graph.html, which is otherwise standalone and
+ * used to carry its own private copy of these colours. Nothing outside this file
+ * may declare a literal colour: a hex anywhere else is invisible to the theme
+ * switcher and would silently stay one theme.
+ *
+ * ── How the three theme states resolve ────────────────────────────────────────
+ * The complete LIGHT palette is defined on bare :root, so every token always has
+ * a value no matter which query matches. Dark is then applied twice, and both
+ * copies must stay identical:
+ *
+ *   1. @media (prefers-color-scheme: dark) + :root:not([data-theme="light"])
+ *      — the "system" default, which needs no JavaScript at all. The :not()
+ *        guard is what lets an explicit light choice beat a dark OS setting.
+ *   2. :root[data-theme="dark"]
+ *      — an explicit choice, which must beat a light OS setting.
+ *
+ * No token may have its only definition inside a media or [data-theme] block.
+ * test/unit/ui-tokens.test.ts enforces that, the equality of the two dark
+ * blocks, and WCAG AA contrast across BOTH themes.
+ *
+ * ── Visual language ───────────────────────────────────────────────────────────
+ * Surfaces are flat: one ground, one panel colour, and a hairline --color-border
+ * doing the separating, rather than a four-step grey elevation ramp. A single
+ * --color-accent drives every interactive surface (links, active nav, progress,
+ * primary CTA); --color-primary is reserved for success semantics so green and
+ * blue stop competing for the same job.
+ */
+
+:root {
+  /* Surfaces — one flat ground plus a hairline border, not a grey elevation ramp */
+  --color-bg:                           #faf9f8;
+  --color-surface:                      #ffffff;
+  --color-surface-container:            #ffffff;  /* cards and panels: flat, separated by --color-border */
+  --color-surface-container-high:       #f3f2f1;
+  --color-surface-container-highest:    #edebe9;
+  --color-sidebar-bg:                   #f3f2f1;
+
+  /* Borders — these carry the separation the grey ramp used to */
+  --color-border:                       #e1dfdd;
+  --color-border-strong:                #c8c6c4;
+  --color-border-subtle:                #edebe9;  /* table row rules, nav/panel dividers */
+
+  /* Text, brightest to faintest */
+  --color-text:                         #201f1e;
+  --color-text-bright:                  #000000;
+  --color-text-muted:                   #323130;
+  --color-text-subtle:                  #484644;
+  --color-text-faint:                   #57534e;
+  --color-text-dim:                     #605e5c;
+  --color-text-dimmer:                  #6e6c6a;
+  --color-text-faintest:                #767472;
+  --color-on-primary:                   #ffffff;  /* text on a filled accent button */
+
+  /* Accents — one accent drives every interactive surface */
+  --color-accent:                       #0f6cbd;  /* links, active nav, progress fill, primary CTA */
+  --color-secondary:                    #0f6cbd;  /* kept as an alias so informational blue matches the accent */
+  --color-primary:                      #0b6a45;  /* success only — done states, not brand */
+  --color-danger:                       #a4262c;
+  --color-warning:                      #8a6100;
+
+  /* Tonal status surfaces (badge and button backgrounds) */
+  --color-success-surface:              #dff3e9;
+  --color-success-border:               #a9d9c3;
+  --color-danger-surface:               #fdeaec;
+  --color-danger-border:                #f0b8bd;
+  --color-warning-surface:              #fdf3d7;
+  --color-info-surface:                 #e5eff9;
+  --color-neutral-surface:              #f3f2f1;
+  --color-warn-surface:                 #fff8e8;  /* portfolio spread-warning card */
+  --color-warn-border:                  #e8cf9a;
+
+  /* Cast by an unpinned slide-out over the page it covers */
+  --color-panel-shadow:                 rgba(0, 0, 0, 0.14);
+
+  /* ── Task status ──────────────────────────────────────────────────────────
+   * One pair per task status: a foreground used both as badge text and as the
+   * CPM graph node's outline stroke, plus the tonal surface behind the badge.
+   *
+   * These repeat the semantic accent values above rather than aliasing them
+   * with var(), exactly as --color-graph-label-crit already does. The graph
+   * needs to retune a status colour for legibility against the node fill
+   * without dragging every danger/warning surface in the app with it.
+   *
+   * The hues encode progress, not category: grey has not started, blue is
+   * moving, green is finished, red is stuck. Saturation rises as work
+   * advances, which is why 'todo' is deliberately the dullest thing on screen.
+   *
+   * todo and dropped share the grey family on purpose — both mean "not active
+   * work". They separate by weight, and on the graph by a dashed stroke on
+   * dropped, a second non-colour cue since hue alone would not carry it.
+   *
+   * Two contrast bars, both enforced by test/unit/ui-tokens.test.ts in BOTH
+   * themes: 4.5:1 against the paired surface (badge text is small), and 3:1
+   * against --color-graph-node-fill (a 2px stroke, the non-text bar).
+   */
+  --color-status-todo:                  #57534e;
+  --color-status-todo-surface:          #f3f2f1;
+  --color-status-in-progress:           #0f6cbd;
+  --color-status-in-progress-surface:   #e5eff9;
+  --color-status-blocked:               #a4262c;
+  --color-status-blocked-surface:       #fdeaec;
+  --color-status-done:                  #0b6a45;
+  --color-status-done-surface:          #dff3e9;
+  --color-status-dropped:               #6e6c6a;
+  --color-status-dropped-surface:       #f3f2f1;
+
+  /* Executor identity */
+  --color-executor-llm:                 #0e6b7c;
+  --color-executor-human:               #6b2fb5;
+  --color-executor-hybrid:              #a4265f;
+  --color-executor-auto:                #605e5c;
+  --color-executor-llm-surface:         #dceff2;
+  --color-executor-human-surface:       #ece0fa;
+  --color-executor-hybrid-surface:      #fbe2ec;
+  --color-executor-auto-surface:        #ebeae9;
+
+  /* WSJF accent (distinct from the status colours) */
+  --color-wsjf:                         #5b32b0;
+  --color-wsjf-surface:                 rgba(91, 50, 176, 0.10);
+  --color-wsjf-border:                  rgba(91, 50, 176, 0.28);
+
+  /* Dependency graph */
+  --color-graph-canvas:                 #e9e7e5;  /* sits off the page ground so nodes read as objects */
+  --color-graph-control:                #ffffff;
+  --color-graph-control-hover:          #eeecea;
+  --color-graph-control-border-hover:   #8a8886;
+  --color-graph-node-fill:              #ffffff;
+  --color-graph-node-stroke:            #c8c6c4;
+  --color-graph-node-fill-crit:         #fdeaec;
+  --color-graph-edge:                   #c8c6c4;
+  --color-graph-arrow:                  #8a8886;
+  --color-graph-label:                  #201f1e;
+  --color-graph-label-crit:             #a4262c;
+  --color-graph-meta:                   #605e5c;
+  --color-graph-wsjf-chip:              #5b32b0;
+  --color-graph-wsjf-chip-empty:        #767472;
+  --color-graph-phase-chip:             #767472;
+  --color-graph-legend-fill:            #eef0f8;
+  --color-graph-legend-border:          #b9c0e0;
+
+  /* Typography and geometry — identical across themes */
+  --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius:              4px;
+  --radius-sm:           2px;
+  --space-card-padding:  0.85rem;
+  --space-section-gap:   1.5rem;
+  --space-gutter-md:     1.25rem;
+  --sidebar-width:       240px;
+  --agent-panel-width:   340px;
+  --task-panel-width:    380px;
+}
+
+/* Dark, as the system preference. An explicit light choice wins over it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* Surfaces — one flat ground plus a hairline border, not a grey elevation ramp */
+    --color-bg:                           #1b1a19;
+    --color-surface:                      #201f1e;
+    --color-surface-container:            #201f1e;  /* cards and panels: flat, separated by --color-border */
+    --color-surface-container-high:       #292827;
+    --color-surface-container-highest:    #323130;
+    --color-sidebar-bg:                   #201f1e;
+
+    /* Borders — these carry the separation the grey ramp used to */
+    --color-border:                       #3b3a39;
+    --color-border-strong:                #484644;
+    --color-border-subtle:                #292827;  /* table row rules, nav/panel dividers */
+
+    /* Text, brightest to faintest */
+    --color-text:                         #f3f2f1;
+    --color-text-bright:                  #ffffff;
+    --color-text-muted:                   #e1dfdd;
+    --color-text-subtle:                  #d2d0ce;
+    --color-text-faint:                   #c8c6c4;
+    --color-text-dim:                     #b3b0ad;
+    --color-text-dimmer:                  #a19f9d;
+    --color-text-faintest:                #8a8886;
+    --color-on-primary:                   #1b1a19;  /* text on a filled accent button */
+
+    /* Accents — one accent drives every interactive surface */
+    --color-accent:                       #479ef5;  /* links, active nav, progress fill, primary CTA */
+    --color-secondary:                    #479ef5;  /* kept as an alias so informational blue matches the accent */
+    --color-primary:                      #5ec49a;  /* success only — done states, not brand */
+    --color-danger:                       #f1707b;
+    --color-warning:                      #e3b341;
+
+    /* Tonal status surfaces (badge and button backgrounds) */
+    --color-success-surface:              #1a3325;
+    --color-success-border:               #2f5c45;
+    --color-danger-surface:               #3b1f22;
+    --color-danger-border:                #6b3238;
+    --color-warning-surface:              #3a2f1a;
+    --color-info-surface:                 #17324d;
+    --color-neutral-surface:              #323130;
+    --color-warn-surface:                 #2b2416;  /* portfolio spread-warning card */
+    --color-warn-border:                  #5a4a20;
+
+    /* Cast by an unpinned slide-out over the page it covers */
+    --color-panel-shadow:                 rgba(0, 0, 0, 0.55);
+
+    /* Task status — see the :root block for the two contrast bars these meet */
+    --color-status-todo:                  #c8c6c4;
+    --color-status-todo-surface:          #323130;
+    --color-status-in-progress:           #479ef5;
+    --color-status-in-progress-surface:   #17324d;
+    --color-status-blocked:               #f1707b;
+    --color-status-blocked-surface:       #3b1f22;
+    --color-status-done:                  #5ec49a;
+    --color-status-done-surface:          #1a3325;
+    --color-status-dropped:               #a19f9d;
+    --color-status-dropped-surface:       #323130;
+
+    /* Executor identity */
+    --color-executor-llm:                 #4fd8eb;
+    --color-executor-human:               #c6a4f5;
+    --color-executor-hybrid:              #f79bc4;
+    --color-executor-auto:                #b3b0ad;
+    --color-executor-llm-surface:         #123a3f;
+    --color-executor-human-surface:       #2d1f45;
+    --color-executor-hybrid-surface:      #3f1f30;
+    --color-executor-auto-surface:        #323130;
+
+    /* WSJF accent (distinct from the status colours) */
+    --color-wsjf:                         #b39bf0;
+    --color-wsjf-surface:                 rgba(179, 155, 240, 0.14);
+    --color-wsjf-border:                  rgba(179, 155, 240, 0.32);
+
+    /* Dependency graph */
+    --color-graph-canvas:                 #161514;  /* sits off the page ground so nodes read as objects */
+    --color-graph-control:                #201f1e;
+    --color-graph-control-hover:          #292827;
+    --color-graph-control-border-hover:   #605e5c;
+    --color-graph-node-fill:              #2b2a35;
+    --color-graph-node-stroke:            #3b3a39;
+    --color-graph-node-fill-crit:         #3b1f22;
+    --color-graph-edge:                   #4a4846;
+    --color-graph-arrow:                  #6e6c6a;
+    --color-graph-label:                  #e1dfdd;
+    --color-graph-label-crit:             #f1707b;
+    --color-graph-meta:                   #a19f9d;
+    --color-graph-wsjf-chip:              #b39bf0;
+    --color-graph-wsjf-chip-empty:        #8a8886;
+    --color-graph-phase-chip:             #8a8886;
+    --color-graph-legend-fill:            #2b2a35;
+    --color-graph-legend-border:          #4a4846;
+  }
+}
+
+/* Dark, chosen explicitly. Wins over a light OS setting. */
+:root[data-theme="dark"] {
+    /* Surfaces — one flat ground plus a hairline border, not a grey elevation ramp */
+    --color-bg:                           #1b1a19;
+    --color-surface:                      #201f1e;
+    --color-surface-container:            #201f1e;  /* cards and panels: flat, separated by --color-border */
+    --color-surface-container-high:       #292827;
+    --color-surface-container-highest:    #323130;
+    --color-sidebar-bg:                   #201f1e;
+
+    /* Borders — these carry the separation the grey ramp used to */
+    --color-border:                       #3b3a39;
+    --color-border-strong:                #484644;
+    --color-border-subtle:                #292827;  /* table row rules, nav/panel dividers */
+
+    /* Text, brightest to faintest */
+    --color-text:                         #f3f2f1;
+    --color-text-bright:                  #ffffff;
+    --color-text-muted:                   #e1dfdd;
+    --color-text-subtle:                  #d2d0ce;
+    --color-text-faint:                   #c8c6c4;
+    --color-text-dim:                     #b3b0ad;
+    --color-text-dimmer:                  #a19f9d;
+    --color-text-faintest:                #8a8886;
+    --color-on-primary:                   #1b1a19;  /* text on a filled accent button */
+
+    /* Accents — one accent drives every interactive surface */
+    --color-accent:                       #479ef5;  /* links, active nav, progress fill, primary CTA */
+    --color-secondary:                    #479ef5;  /* kept as an alias so informational blue matches the accent */
+    --color-primary:                      #5ec49a;  /* success only — done states, not brand */
+    --color-danger:                       #f1707b;
+    --color-warning:                      #e3b341;
+
+    /* Tonal status surfaces (badge and button backgrounds) */
+    --color-success-surface:              #1a3325;
+    --color-success-border:               #2f5c45;
+    --color-danger-surface:               #3b1f22;
+    --color-danger-border:                #6b3238;
+    --color-warning-surface:              #3a2f1a;
+    --color-info-surface:                 #17324d;
+    --color-neutral-surface:              #323130;
+    --color-warn-surface:                 #2b2416;  /* portfolio spread-warning card */
+    --color-warn-border:                  #5a4a20;
+
+    /* Cast by an unpinned slide-out over the page it covers */
+    --color-panel-shadow:                 rgba(0, 0, 0, 0.55);
+
+    /* Task status — see the :root block for the two contrast bars these meet */
+    --color-status-todo:                  #c8c6c4;
+    --color-status-todo-surface:          #323130;
+    --color-status-in-progress:           #479ef5;
+    --color-status-in-progress-surface:   #17324d;
+    --color-status-blocked:               #f1707b;
+    --color-status-blocked-surface:       #3b1f22;
+    --color-status-done:                  #5ec49a;
+    --color-status-done-surface:          #1a3325;
+    --color-status-dropped:               #a19f9d;
+    --color-status-dropped-surface:       #323130;
+
+    /* Executor identity */
+    --color-executor-llm:                 #4fd8eb;
+    --color-executor-human:               #c6a4f5;
+    --color-executor-hybrid:              #f79bc4;
+    --color-executor-auto:                #b3b0ad;
+    --color-executor-llm-surface:         #123a3f;
+    --color-executor-human-surface:       #2d1f45;
+    --color-executor-hybrid-surface:      #3f1f30;
+    --color-executor-auto-surface:        #323130;
+
+    /* WSJF accent (distinct from the status colours) */
+    --color-wsjf:                         #b39bf0;
+    --color-wsjf-surface:                 rgba(179, 155, 240, 0.14);
+    --color-wsjf-border:                  rgba(179, 155, 240, 0.32);
+
+    /* Dependency graph */
+    --color-graph-canvas:                 #161514;  /* sits off the page ground so nodes read as objects */
+    --color-graph-control:                #201f1e;
+    --color-graph-control-hover:          #292827;
+    --color-graph-control-border-hover:   #605e5c;
+    --color-graph-node-fill:              #2b2a35;
+    --color-graph-node-stroke:            #3b3a39;
+    --color-graph-node-fill-crit:         #3b1f22;
+    --color-graph-edge:                   #4a4846;
+    --color-graph-arrow:                  #6e6c6a;
+    --color-graph-label:                  #e1dfdd;
+    --color-graph-label-crit:             #f1707b;
+    --color-graph-meta:                   #a19f9d;
+    --color-graph-wsjf-chip:              #b39bf0;
+    --color-graph-wsjf-chip-empty:        #8a8886;
+    --color-graph-phase-chip:             #8a8886;
+    --color-graph-legend-fill:            #2b2a35;
+    --color-graph-legend-border:          #4a4846;
+}

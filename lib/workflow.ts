@@ -20,7 +20,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from './ask.ts';
 import { updateTaskStatus, logAudit, listAdrs, dependenciesByProject, tasksByProject, taskBySlug, activeSession, findRepoRoot, updateTaskWorktreePath } from './db.ts';
 import type { Project, Task, TaskType } from './db.ts';
-import { readDbSignatures, readTestPattern } from './codebase.ts';
+import { readDbSignatures, readTestPattern, resolveConventions } from './codebase.ts';
 
 // ── Codebase grounding helpers ────────────────────────────────────────────────
 // readDbSignatures and readTestPattern imported from lib/codebase.ts
@@ -145,7 +145,16 @@ export function gitCommitFiles(
   // is not necessarily the worktree we resolved to.
   const abs = files.map(f => (isAbsolute(f) ? f : join(cwd, f)));
 
-  const add = git(['add', ...abs], root, noop);
+  // `-A --` rather than a bare `git add`: plain add fails with "pathspec did
+  // not match any files" on a path deleted from the working tree, which
+  // rejected the whole commit whenever it included a deletion. With -A a single
+  // call stages adds, modifications and deletions alike.
+  //
+  // The commit itself stays unrestricted by path on purpose. Callers rely on it
+  // sweeping in whatever is already staged — that is what made the manual
+  // `git rm --cached` workaround for this very bug work — so narrowing it to
+  // `commit -- <paths>` would be a separate behaviour change, not a bug fix.
+  const add = git(['add', '-A', '--', ...abs], root, noop);
   if (!add.ok) return { ...add, root };
   const commit = git(['commit', '-m', message], root, noop);
   return { ...commit, root, branch: currentBranch(root) ?? undefined };
@@ -353,23 +362,30 @@ function baseSystemPrompt(task: Task, proj: Project, db: DatabaseSync, cwd: stri
       ).join('\n\n')
     : '';
 
-  // DB signatures from modular lib/db/*.ts
+  // DB signatures from modular lib/db/*.ts. Empty for any repo without one,
+  // which is most of them — the section is omitted rather than printed blank.
   const dbSigs = readDbSignatures(cwd);
+  const dbSection = dbSigs
+    ? `\n\n## lib/db exports (real API — use these, do not invent):\n${dbSigs}`
+    : '';
 
-  return `You are an expert TypeScript/Node.js engineer working on the crux project.
+  // The agent is told this project's conventions, or none at all. It used to be
+  // told crux's — "edit lib/db/<domain>.ts", "run make test-ci" — for every
+  // project, so an agent working a C or Python task was instructed to edit files
+  // that do not exist. Silence is recoverable; confident wrong house rules
+  // are not.
+  const { conventions, conventions_source } = resolveConventions(proj.repo_path);
+  const conventionsSection = conventions.length
+    ? `\n\n## Project conventions (from ${conventions_source})\n${conventions.map(c => `- ${c}`).join('\n')}`
+    : '\n\n## Project conventions\nNone recorded for this project. Follow the conventions visible in the surrounding code — do not assume a stack or a layout.';
 
-## Project conventions
-- DB layer: lib/db/<domain>.ts — one file per domain (roi.ts, tasks.ts, sessions.ts, etc.)
-- New DB functions: create a new file lib/db/<domain>.ts, then add its export to lib/db/index.ts
-- Do NOT edit lib/db.ts (it is a one-line re-export shim — do not add code there)
-- All DB functions take (db: DatabaseSync, ...) as first arg — use openDb() in CLI, pass db in tests
-- Tests: node:test + node:assert/strict, in-memory DB via new DatabaseSync(':memory:'), load schema.sql
-- Schema changes: schema.sql AND applyMigrations() in lib/db/open.ts (ALTER TABLE pattern)
-- MCP tools: index.ts — use process.stderr.write, never console.log
-- Verify: make typecheck | Tests: make test | Never run node/npx/tsc directly
+  const commands = [
+    proj.verify_cmd ? `Verify: ${proj.verify_cmd}` : null,
+    proj.test_cmd   ? `Tests: ${proj.test_cmd}`    : null,
+  ].filter(Boolean);
+  const commandsSection = commands.length ? `\n\n## Commands\n${commands.map(c => `- ${c}`).join('\n')}` : '';
 
-## lib/db exports (real API — use these, do not invent):
-${dbSigs}
+  return `You are an expert software engineer working on the ${proj.name} project.${conventionsSection}${commandsSection}${dbSection}
 
 ## Task: ${task.slug}
 Title: ${task.title}

@@ -1,0 +1,31 @@
+# Containerfile.e2e — the Playwright tier.
+#
+# Tracked in git, unlike the previous .crux/Containerfile.e2e, which lived
+# inside a gitignored directory and so did not exist on a fresh clone or in CI.
+#
+# Built on node:25-slim rather than the official Playwright image because the
+# repo runs .ts directly under Node's native TypeScript support (AGENTS.md), and
+# the Playwright images ship an older Node. scripts/e2e-seed.ts is a .ts file
+# imported straight from the db layer, so the Node version has to be ours.
+#
+# Browsers are installed to /ms-playwright, outside /app, so that mounting the
+# working tree over /app at run time cannot shadow them.
+
+FROM node:25-slim
+
+# Keep in step with the @playwright/test devDependency: the browser build is
+# pinned per Playwright release, and a mismatch fails at run time with
+# "Executable doesn't exist".
+ARG PLAYWRIGHT_VERSION=1.62.1
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    NODE_ENV=development \
+    CI=true
+
+WORKDIR /app
+
+# --with-deps pulls the system libraries Chromium needs (fonts, X libs, etc.).
+RUN npx --yes playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
+CMD ["npx", "playwright", "test"]

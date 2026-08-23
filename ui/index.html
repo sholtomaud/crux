@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f0f0f">
   <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/tokens.css">
+  <script src="/theme.js"></script>
   <title>crux — Portfolio</title>
   <style>
     .page-header { margin-bottom: var(--space-section-gap); }
@@ -13,7 +15,7 @@
 
     .metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: var(--space-section-gap); }
     .metric-card { display: flex; flex-direction: column; gap: 0.5rem; }
-    .metric-card.warn { border-color: #4a3a1a; background: #1a1608; }
+    .metric-card.warn { border-color: var(--color-warn-border); background: var(--color-warn-surface); }
     .metric-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-dim); display: flex; align-items: center; justify-content: space-between; }
     .metric-value { font-size: 1.5rem; font-weight: 700; color: var(--color-text-bright); }
     .metric-value.danger { color: var(--color-danger); }
@@ -30,6 +32,8 @@
     .initiative-progress-label { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--color-text-dim); margin-bottom: 0.3rem; }
     .initiative-next-label { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-dimmer); margin-bottom: 0.2rem; }
     .initiative-next-value { font-size: 0.82rem; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Stalled reads as a problem, not as a quiet absence of work. */
+    .initiative-next-value.is-blocked { color: var(--color-status-blocked); font-weight: 600; }
     .initiative-executor { display: flex; justify-content: flex-end; }
   </style>
 </head>
@@ -103,6 +107,15 @@
       initiativesEl.innerHTML = active.map(p => {
         const pct = p.task_count > 0 ? Math.round((p.done_count / p.task_count) * 100) : 0;
         const next = p.next_task;
+        // Three states, not two. A stalled project needs attention and a
+        // finished one does not, and rendering both as "No open tasks" hid
+        // exactly the case worth surfacing on a portfolio view.
+        const blockedBy = p.blocked_by ?? [];
+        const nextValue = next
+          ? next.title
+          : blockedBy.length
+            ? `Blocked — ${blockedBy.slice(0, 2).join(', ')}${blockedBy.length > 2 ? ` +${blockedBy.length - 2}` : ''}`
+            : 'No open tasks';
         return `
           <a href="/project?id=${p.id}" class="card initiative-card">
             <div class="initiative-top">
@@ -116,7 +129,7 @@
               </div>
               <div>
                 <div class="initiative-next-label">Next Action</div>
-                <div class="initiative-next-value">${next ? next.title : 'No open tasks'}</div>
+                <div class="initiative-next-value${!next && blockedBy.length ? ' is-blocked' : ''}">${nextValue}</div>
               </div>
               <div class="initiative-executor">${next ? executorBadge(next.executor) : ''}</div>
             </div>

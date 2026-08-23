@@ -8,6 +8,5 @@
     "strict": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "lib/**/*.ts", "test/**/*.ts"],
-  "exclude": ["test/e2e/**/*.ts"]
+  "include": ["index.ts", "lib/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "playwright.config.ts"]
 }

@@ -121,20 +121,44 @@ export function updateTaskSpec(
   }
 }
 
+/**
+ * Every task column a human may edit directly. The CPM columns are absent on
+ * purpose — they are computed by lib/cpm.ts, so letting an edit set them would
+ * let the UI write a schedule the graph never derived. id, project_id, slug,
+ * created_at and worktree_path are identity/provenance and are not editable.
+ *
+ * This list is also the SQL injection boundary: column names are interpolated
+ * into the UPDATE below, so they must only ever come from this frozen literal —
+ * never from a request body. Callers pass values, never column names.
+ */
+export const UPDATABLE_TASK_FIELDS = [
+  'title', 'description', 'phase', 'priority',
+  'duration_days', 'value_score', 'task_type', 'executor',
+  'acceptance_criteria',
+] as const;
+
+export type UpdatableTaskField = typeof UPDATABLE_TASK_FIELDS[number];
+export type TaskFieldPatch = Partial<Record<UpdatableTaskField, string | number | null>>;
+
+/**
+ * Applies a partial patch in one statement and returns the columns it actually
+ * wrote, so callers can audit precisely what changed.
+ *
+ * `undefined` means "not supplied" and is skipped; `null` means "clear this
+ * column" and is written. An empty patch writes nothing at all.
+ */
 export function updateTaskFields(
   db: DatabaseSync,
   taskId: number,
-  opts: { phase?: string; description?: string; duration_days?: number }
-): void {
-  if (opts.phase !== undefined) {
-    db.prepare('UPDATE tasks SET phase = ? WHERE id = ?').run(opts.phase, taskId);
-  }
-  if (opts.description !== undefined) {
-    db.prepare('UPDATE tasks SET description = ? WHERE id = ?').run(opts.description, taskId);
-  }
-  if (opts.duration_days !== undefined) {
-    db.prepare('UPDATE tasks SET duration_days = ? WHERE id = ?').run(opts.duration_days, taskId);
-  }
+  opts: TaskFieldPatch,
+): UpdatableTaskField[] {
+  const cols = UPDATABLE_TASK_FIELDS.filter(c => opts[c] !== undefined);
+  if (cols.length === 0) return [];
+
+  db.prepare(`UPDATE tasks SET ${cols.map(c => `${c} = ?`).join(', ')} WHERE id = ?`)
+    .run(...cols.map(c => opts[c] as string | number | null), taskId);
+
+  return [...cols];
 }
 
 export function updateTaskCpm(

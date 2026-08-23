@@ -33,7 +33,7 @@ function seedProject(db: DatabaseSync, name = 'test', type = 'code_repo') {
 function seedTask(db: DatabaseSync, projectId: string, slug: string) {
   db.prepare(`
     INSERT INTO tasks (project_id, slug, title, status)
-    VALUES (?, ?, ?, 'open')
+    VALUES (?, ?, ?, 'todo')
   `).run(projectId, slug, slug);
   return db.prepare('SELECT * FROM tasks WHERE project_id = ? AND slug = ?').get(projectId, slug) as { id: number; status: string };
 }
@@ -57,7 +57,7 @@ describe('updateTaskStatusHandler', () => {
     const result = updateTaskStatusHandler(db, p.id, 'alpha', 'bogus');
     assert.equal(result.status, 400);
     const row = db.prepare('SELECT status FROM tasks WHERE project_id = ? AND slug = ?').get(p.id, 'alpha') as { status: string };
-    assert.equal(row.status, 'open');
+    assert.equal(row.status, 'todo');
     db.close();
   });
 

@@ -6,19 +6,24 @@
   <meta name="theme-color" content="#0f0f0f">
   <link rel="manifest" href="/manifest.json">
   <title>crux — CPM Graph</title>
+  <link rel="stylesheet" href="/tokens.css">
+  <script src="/theme.js"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, monospace; background: #0f0f0f; color: #e0e0e0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    /* app.js's shared shell makes #app-main a padded, vertically scrolling
+       column. The graph wants neither: it fills the pane edge-to-edge and pans
+       itself, so the page must never grow its own scrollbar. The extra `body`
+       raises specificity — app.js appends its <style> to <head> after this one,
+       so an equal-specificity rule would lose. */
+    body #app-main { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 
-    nav { padding: 0.6rem 1.2rem; border-bottom: 1px solid #1e1e1e; flex-shrink: 0; }
-    nav a { color: #60a5fa; text-decoration: none; font-size: 0.85rem; }
+    header { padding: 0.9rem 1.2rem 0.4rem; flex-shrink: 0; }
+    .breadcrumb { font-size: 0.75rem; color: var(--color-text-dimmer); margin-bottom: 0.3rem; }
+    .breadcrumb a { color: var(--color-text-dimmer); }
+    h1 { font-size: 1.15rem; color: var(--color-text-bright); }
+    #meta { font-size: 0.78rem; color: var(--color-text-dim); margin-top: 0.25rem; line-height: 1.5; }
+    #critical-path { font-size: 0.75rem; color: var(--color-danger); margin-top: 0.15rem; word-break: break-all; }
 
-    header { padding: 0.7rem 1.2rem 0.4rem; flex-shrink: 0; }
-    h1 { font-size: 1.15rem; color: #fff; }
-    #meta { font-size: 0.78rem; color: #666; margin-top: 0.25rem; line-height: 1.5; }
-    #critical-path { font-size: 0.75rem; color: #f87171; margin-top: 0.15rem; word-break: break-all; }
-
-    .legend { display: flex; gap: 1.2rem; padding: 0.5rem 1.2rem; font-size: 0.72rem; color: #777; border-bottom: 1px solid #1a1a1a; flex-wrap: wrap; flex-shrink: 0; }
+    .legend { display: flex; gap: 1.2rem; padding: 0.5rem 1.2rem; font-size: 0.72rem; color: var(--color-executor-auto); border-bottom: 1px solid var(--color-surface-container); flex-wrap: wrap; flex-shrink: 0; }
     .legend-item { display: flex; align-items: center; gap: 0.35rem; }
     .lbox { width: 11px; height: 11px; border-radius: 2px; }
 
@@ -35,51 +40,88 @@
     .zoom-controls { position: absolute; top: 0.6rem; right: 0.6rem; display: flex; flex-direction: column; gap: 0.3rem; z-index: 10; }
     .zoom-btn {
       width: 28px; height: 28px;
-      background: #1c1c1c; color: #ccc; border: 1px solid #333; border-radius: 4px;
+      background: var(--color-graph-control); color: var(--color-text-muted); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
       font: inherit; font-size: 0.95rem; line-height: 1; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
     }
-    .zoom-btn:hover { background: #262626; border-color: #444; color: #60a5fa; }
+    .zoom-btn:hover { background: var(--color-graph-control-hover); border-color: var(--color-graph-control-border-hover); color: var(--color-secondary); }
 
-    #info-panel {
-      flex-shrink: 0;
-      padding: 0.6rem 1.2rem;
-      border-top: 1px solid #1e1e1e;
-      font-size: 0.78rem;
-      min-height: 52px;
-      display: flex;
-      gap: 1.5rem;
-      align-items: center;
-      flex-wrap: wrap;
-      background: #0c0c0c;
-    }
-    .ifield { display: flex; flex-direction: column; gap: 0.1rem; }
-    .ilabel { font-size: 0.65rem; color: #444; text-transform: uppercase; letter-spacing: 0.06em; }
-    .ivalue { color: #cbd5e1; }
-    .ivalue.crit { color: #f87171; }
-    .ivalue.wsjf { color: #a78bfa; }
-    .placeholder { color: #444; font-size: 0.75rem; }
+    .error-text { color: var(--color-danger); }
+
+    /* ── Graph SVG ──
+       Styled by class rather than by inline fill/stroke attributes so the
+       whole diagram re-colours with the theme, and so hover is CSS rather
+       than a pair of JS listeners rewriting attributes. */
+    .edge      { fill: none; stroke: var(--color-graph-edge); stroke-width: 1.5; }
+    .edge.crit { stroke: var(--color-danger); stroke-width: 2; }
+    .arrow-head      { fill: var(--color-graph-arrow); }
+    .arrow-head.crit { fill: var(--color-danger); }
+    /* Status owns the outline. The critical path owns the left accent bar, the
+       ★ prefix, the red slug and the edge colour — but NOT the fill and NOT the
+       stroke. Both of those used to be red, and on a real project most tasks are
+       critical, so a red-tinted fill behind a 2px status stroke drowned the
+       status on exactly the nodes you most need to read. Critical is now carried
+       entirely by marks at the node's edge, which leaves the whole body free to
+       say one thing: what state the work is in. */
+    .node-bg                          { fill: var(--color-graph-node-fill); stroke: var(--color-graph-node-stroke); stroke-width: 2; }
+    .node.status-todo .node-bg        { stroke: var(--color-status-todo); }
+    .node.status-in-progress .node-bg { stroke: var(--color-status-in-progress); }
+    .node.status-blocked .node-bg     { stroke: var(--color-status-blocked); }
+    .node.status-done .node-bg        { stroke: var(--color-status-done); }
+    /* Dropped's grey is the one status close enough to the default border to be
+       ambiguous, so it carries a second, non-colour cue (WCAG 1.4.1). */
+    .node.status-dropped .node-bg     { stroke: var(--color-status-dropped); stroke-dasharray: 4 3; }
+
+    /* Hover thickens and brightens rather than recolouring: a hover that
+       repainted the stroke would erase the status for exactly as long as you
+       were pointing at the node you wanted to read. */
+    .node:hover .node-bg              { stroke-width: 3.5; }
+    .node:hover .node-slug            { fill: var(--color-text-bright); }
+    .node-accent          { fill: var(--color-danger); }
+    .node-slug            { fill: var(--color-graph-label); font-family: var(--font-mono); }
+    .node.crit .node-slug { fill: var(--color-graph-label-crit); }
+    .node-title           { fill: var(--color-graph-meta); font-family: var(--font-mono); }
+    .node-metrics         { fill: var(--color-graph-wsjf-chip); font-family: var(--font-mono); }
+    .node-metrics.no-wsjf { fill: var(--color-graph-wsjf-chip-empty); }
+    .node-phase           { fill: var(--color-graph-phase-chip); font-family: var(--font-mono); }
+    /* Outlined, not filled — the swatch should depict the encoding it explains,
+       which on the graph is a border rather than a body colour. */
+    .lbox                    { background: transparent; border: 2px solid var(--color-graph-node-stroke); }
+    .lbox.status-todo        { border-color: var(--color-status-todo); }
+    .lbox.status-in-progress { border-color: var(--color-status-in-progress); }
+    .lbox.status-blocked     { border-color: var(--color-status-blocked); }
+    .lbox.status-done        { border-color: var(--color-status-done); }
+    .lbox.status-dropped     { border-color: var(--color-status-dropped); border-style: dashed; }
+    /* The critical marker is a bar, so its swatch is one too. */
+    .lbar         { width: 3px; height: 12px; border-radius: 2px; background: var(--color-danger); }
+    .legend-wsjf  { color: var(--color-wsjf); }
+    .legend-hint  { color: var(--color-text-faintest); }
   </style>
 </head>
 <body>
-  <nav><a href="/">← all projects</a> <a id="nav-project" href="#" hidden>· ← this project</a></nav>
+  <div id="app-main">
   <header>
+    <div class="breadcrumb"><a href="/">Portfolio</a> › <a id="nav-project" href="#">…</a> › Dependency Graph</div>
     <h1>CPM Graph — <span id="proj-name">…</span></h1>
     <div id="meta">Loading…</div>
     <div id="critical-path"></div>
   </header>
   <div class="legend">
-    <span class="legend-item"><div class="lbox" style="background:#2d1212;border:1px solid #f87171"></div>Critical path</span>
-    <span class="legend-item"><div class="lbox" style="background:#151528;border:1px solid #334"></div>Non-critical</span>
-    <span class="legend-item" style="color:#a78bfa">WSJF = value ÷ duration</span>
+    <span class="legend-item"><div class="lbox status-todo"></div>Todo</span>
+    <span class="legend-item"><div class="lbox status-in-progress"></div>In progress</span>
+    <span class="legend-item"><div class="lbox status-blocked"></div>Blocked</span>
+    <span class="legend-item"><div class="lbox status-done"></div>Done</span>
+    <span class="legend-item"><div class="lbox status-dropped"></div>Dropped</span>
+    <span class="legend-item"><div class="lbar"></div>★ Critical path (left bar)</span>
+    <span class="legend-item legend-wsjf">WSJF = value ÷ duration</span>
     <span class="legend-item">Float = slack before critical</span>
-    <span class="legend-item" style="color:#444">scroll=zoom · drag=pan · click=details</span>
+    <span class="legend-item legend-hint">scroll=zoom · drag=pan · click=details</span>
   </div>
   <div id="graph-wrap">
     <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <marker id="arr"      viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 2 L9 5 L0 8z" fill="#4a4a5a"/></marker>
-        <marker id="arr-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 2 L9 5 L0 8z" fill="#f87171"/></marker>
+        <marker id="arr"      viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 2 L9 5 L0 8z" class="arrow-head"/></marker>
+        <marker id="arr-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 2 L9 5 L0 8z" class="arrow-head crit"/></marker>
       </defs>
       <g id="inner"></g>
     </svg>
@@ -89,16 +131,10 @@
       <button class="zoom-btn" id="zoom-reset" title="Reset view" aria-label="Reset view">⟲</button>
     </div>
   </div>
-  <div id="info-panel"><span class="placeholder">Click a node to see task details</span></div>
+  </div>
 
+  <script src="/app.js"></script>
   <script>
-  // ── Fetch helper ──────────────────────────────────────────────────────────────
-  async function fetchJson(url) {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${url}`);
-    return r.json();
-  }
-
   // ── Layout: column (longest-path rank) + lane (greedy row assignment) ─────────
   function computeLayout(nodes, edges) {
     if (!nodes.length) return { col: new Map(), lane: new Map(), numCols: 0, numLanes: 0 };
@@ -176,13 +212,15 @@
   const NODE_H = 70;
   const PAD    = 40;
 
+  // `svg` rather than `el`: app.js already owns a global el() for HTML elements,
+  // and a second top-level binding of that name is a SyntaxError.
   const NS = 'http://www.w3.org/2000/svg';
-  const el = (tag, a = {}) => {
+  const svg = (tag, a = {}) => {
     const e = document.createElementNS(NS, tag);
     for (const [k, v] of Object.entries(a)) e.setAttribute(k, v);
     return e;
   };
-  const txt = (s, a = {}) => { const e = el('text', a); e.textContent = s; return e; };
+  const txt = (s, a = {}) => { const e = svg('text', a); e.textContent = s; return e; };
   const trunc = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
 
   function renderGraph(inner, nodes, edges, cpmData, layout) {
@@ -197,7 +235,7 @@
     const cy = id => ny(id) + NODE_H / 2;
 
     // ── Edges (rendered behind nodes) ───────────────────────────────────────────
-    const edgeG = el('g');
+    const edgeG = svg('g');
     inner.appendChild(edgeG);
 
     for (const e of edges) {
@@ -210,17 +248,15 @@
       const y2 = cy(e.successor_id);
       const cp = Math.max(30, Math.abs(x2 - x1) * 0.45);
 
-      edgeG.appendChild(el('path', {
+      edgeG.appendChild(svg('path', {
         d: `M${x1} ${y1} C${x1 + cp} ${y1} ${x2 - cp} ${y2} ${x2} ${y2}`,
-        fill: 'none',
-        stroke: isCrit ? '#f87171' : '#2e2e3e',
-        'stroke-width': isCrit ? 2 : 1.5,
+        class: isCrit ? 'edge crit' : 'edge',
         'marker-end': `url(#${isCrit ? 'arr-crit' : 'arr'})`,
       }));
     }
 
     // ── Nodes ───────────────────────────────────────────────────────────────────
-    const nodeG = el('g');
+    const nodeG = svg('g');
     inner.appendChild(nodeG);
 
     for (const n of nodes) {
@@ -229,37 +265,34 @@
       const x = nx(n.id);
       const y = ny(n.id);
 
-      const g = el('g', { class: 'node', 'data-id': n.id });
+      // `status-*` drives the outline colour from CSS. n.status rides in on the
+      // task rows already fetched for the layout, so this costs no extra request.
+      const g = svg('g', { class: `node${isCrit ? ' crit' : ''} status-${n.status}`, 'data-id': n.id });
       g.style.cursor = 'pointer';
 
       // Background
-      g.appendChild(el('rect', {
-        x, y, width: NODE_W, height: NODE_H, rx: 8, ry: 8,
-        fill:   isCrit ? '#2d1212' : '#111122',
-        stroke: isCrit ? '#f87171' : '#2a2a3a',
-        'stroke-width': isCrit ? 1.5 : 1,
+      g.appendChild(svg('rect', {
+        x, y, width: NODE_W, height: NODE_H, rx: 4, ry: 4, class: 'node-bg',
       }));
 
       // Left accent bar for critical
       if (isCrit) {
-        g.appendChild(el('rect', { x, y, width: 3, height: NODE_H, rx: 2, ry: 2, fill: '#f87171' }));
+        g.appendChild(svg('rect', { x, y, width: 5, height: NODE_H, rx: 2, ry: 2, class: 'node-accent' }));
       }
 
       // Slug
       g.appendChild(txt((isCrit ? '★ ' : '○ ') + trunc(n.slug, 22), {
         x: x + 12, y: y + 21,
-        fill: isCrit ? '#fca5a5' : '#c4cde0',
+        class: 'node-slug',
         'font-size': 12,
         'font-weight': 'bold',
-        'font-family': 'monospace',
       }));
 
       // Title
       g.appendChild(txt(trunc(n.title, 27), {
         x: x + 12, y: y + 36,
-        fill: '#606070',
+        class: 'node-title',
         'font-size': 10,
-        'font-family': 'monospace',
       }));
 
       // Metrics row
@@ -271,10 +304,9 @@
         if (parts.length) {
           g.appendChild(txt(parts.join('  ·  '), {
             x: x + 12, y: y + 53,
-            fill: cpm.wsjf_score != null ? '#7c6aaa' : '#3a3a4a',
+            class: cpm.wsjf_score != null ? 'node-metrics' : 'node-metrics no-wsjf',
             'font-size': 9.5,
-            'font-family': 'monospace',
-          }));
+              }));
         }
       }
 
@@ -282,20 +314,13 @@
       if (n.phase) {
         g.appendChild(txt(trunc(n.phase, 12), {
           x: x + NODE_W - 8, y: y + NODE_H - 7,
-          fill: '#333348',
+          class: 'node-phase',
           'font-size': 8,
-          'font-family': 'monospace',
-          'text-anchor': 'end',
+            'text-anchor': 'end',
         }));
       }
 
-      // Hover highlight (SVG inline style toggle via JS)
-      g.addEventListener('mouseenter', () => {
-        g.querySelector('rect').setAttribute('stroke', isCrit ? '#fca5a5' : '#60a5fa');
-      });
-      g.addEventListener('mouseleave', () => {
-        g.querySelector('rect').setAttribute('stroke', isCrit ? '#f87171' : '#2a2a3a');
-      });
+      // Hover highlight lives in CSS (.node:hover .node-bg) so it follows the theme.
 
       nodeG.appendChild(g);
     }
@@ -360,42 +385,22 @@
     };
   }
 
-  // ── Info panel ────────────────────────────────────────────────────────────────
-  function showInfo(task, cpm, panel) {
-    const f = (label, value, cls = '') => value != null ? `
-      <div class="ifield">
-        <span class="ilabel">${label}</span>
-        <span class="ivalue ${cls}">${value}</span>
-      </div>` : '';
-
-    panel.innerHTML = [
-      f('Slug',        task.slug,                                 cpm?.is_critical ? 'crit' : ''),
-      f('Title',       task.title),
-      f('Phase',       task.phase),
-      f('Status',      task.status),
-      f('Duration',    cpm ? `${cpm.duration} days` : null),
-      f('ES / EF',     cpm ? `day ${cpm.early_start} → ${cpm.early_finish}` : null),
-      f('Float',       cpm?.float_days != null ? `${cpm.float_days}d` : null,  cpm?.is_critical ? 'crit' : ''),
-      f('Critical',    cpm?.is_critical ? '★ yes' : 'no',        cpm?.is_critical ? 'crit' : ''),
-      f('Value score', cpm?.value_score),
-      f('WSJF',        cpm?.wsjf_score,                          cpm?.wsjf_score ? 'wsjf' : ''),
-    ].join('');
-  }
-
   // ── Main ──────────────────────────────────────────────────────────────────────
   async function main() {
     const projId   = new URLSearchParams(location.search).get('id');
     const metaEl   = document.getElementById('meta');
     const cpEl     = document.getElementById('critical-path');
-    const infoEl   = document.getElementById('info-panel');
     const svgEl    = document.getElementById('graph-svg');
     const innerEl  = document.getElementById('inner');
 
     if (!projId) { metaEl.textContent = 'No project id in URL (?id=…)'; return; }
 
+    renderAgentPanel();
+    renderTaskPanel();
+    await renderSidebar('graph', projId);
+
     const navProject = document.getElementById('nav-project');
     navProject.href = `/project?id=${projId}`;
-    navProject.hidden = false;
 
     let projData, cpm, allDeps;
     try {
@@ -405,27 +410,28 @@
         fetchJson(`/api/db/dependencies`),
       ]);
     } catch (err) {
-      metaEl.innerHTML = `<span style="color:#f87171">Error: ${err.message}</span>`;
+      metaEl.innerHTML = `<span class="error-text">Error: ${err.message}</span>`;
       return;
     }
 
     const { project, tasks } = projData;
     document.title = `crux — ${project.name} graph`;
     document.getElementById('proj-name').textContent = project.name;
+    navProject.textContent = project.name;
 
     if (!tasks.length) {
       metaEl.textContent = 'No tasks in this project.';
       return;
     }
 
-    metaEl.innerHTML =
-      `<strong>${tasks.length}</strong> tasks &nbsp;|&nbsp; ` +
-      `project duration: <strong>${cpm.project_duration ?? '?'}</strong> days &nbsp;|&nbsp; ` +
-      `${cpm.nodes.filter(n => n.is_critical).length} critical tasks`;
-
-    if (cpm.critical_path?.length) {
-      cpEl.textContent = '★ ' + cpm.critical_path.join(' → ');
-    }
+    const showSummary = () => {
+      metaEl.innerHTML =
+        `<strong>${tasks.length}</strong> tasks &nbsp;|&nbsp; ` +
+        `project duration: <strong>${cpm.project_duration ?? '?'}</strong> days &nbsp;|&nbsp; ` +
+        `${cpm.nodes.filter(n => n.is_critical).length} critical tasks`;
+      cpEl.textContent = cpm.critical_path?.length ? '★ ' + cpm.critical_path.join(' → ') : '';
+    };
+    showSummary();
 
     const taskIds = new Set(tasks.map(t => t.id));
     const edges   = allDeps.filter(d =>
@@ -442,14 +448,47 @@
     document.getElementById('zoom-out').addEventListener('click', panZoom.zoomOut);
     document.getElementById('zoom-reset').addEventListener('click', panZoom.reset);
 
-    // Node click → info panel
-    const cpmById = new Map(cpm.nodes.map(n => [n.id, n]));
+    // Node click → editable detail panel
+    let cpmById = new Map(cpm.nodes.map(n => [n.id, n]));
+    const slugById = new Map(tasks.map(t => [t.id, t.slug]));
+    const neighboursOf = (id) => ({
+      predecessors: edges.filter(d => d.successor_id === id).map(d => slugById.get(d.predecessor_id)).filter(Boolean),
+      successors:   edges.filter(d => d.predecessor_id === id).map(d => slugById.get(d.successor_id)).filter(Boolean),
+    });
+
     svgEl.addEventListener('click', e => {
       const g = e.target.closest('.node');
       if (!g) return;
       const nid  = parseInt(g.dataset.id, 10);
       const task = tasks.find(t => t.id === nid);
-      if (task) showInfo(task, cpmById.get(nid), infoEl);
+      if (!task) return;
+
+      const opened = openTaskPanel(projId, task, cpmById.get(nid), {
+        neighbours: neighboursOf(nid),
+        // Repaint in place rather than reloading: a reload would throw away the
+        // pan and zoom the user set up to find this node in the first place.
+        //
+        // The CPM is refetched rather than reused, because editing a duration
+        // moves float and can move the critical path itself. The layout is not
+        // recomputed — it depends only on the dependency DAG, so nodes stay
+        // exactly where the user left them.
+        onSaved: async (updated) => {
+          Object.assign(task, updated);
+          try { cpm = await fetchJson(`/api/cpm/${projId}`); } catch { /* keep the last good schedule */ }
+          cpmById = new Map(cpm.nodes.map(n => [n.id, n]));
+          showSummary();
+          renderGraph(innerEl, tasks, edges, cpm, layout);
+          document.querySelector(`.node[data-id="${nid}"]`)?.classList.add('tp-selected');
+          return cpmById.get(nid);
+        },
+      });
+
+      // Only after the panel agreed to switch — otherwise cancelling the
+      // discard prompt would leave the highlight on a node you are not editing.
+      if (opened) {
+        document.querySelectorAll('.node.tp-selected').forEach(n => n.classList.remove('tp-selected'));
+        g.classList.add('tp-selected');
+      }
     });
   }
 

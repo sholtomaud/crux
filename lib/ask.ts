@@ -54,7 +54,7 @@ function buildContext(db: DatabaseSync, project: Project): string {
 
   return [
     `Project: ${project.name} (${project.type}, ${project.status})`,
-    `Tasks: ${status.total} total, ${status.done} done, ${status.open} open, ${status.in_progress} in-progress, ${status.blocked} blocked`,
+    `Tasks: ${status.total} total, ${status.done} done,  todo, ${status.in_progress} in-progress, ${status.blocked} blocked`,
     `Hours invested: ${hours.toFixed(1)}h`,
     `Revenue: $${roi.revenue.toFixed(0)} | Cost: $${roi.cost.toFixed(0)} | Expected: $${roi.expected.toFixed(0)}`,
     criticalTasks.length > 0 ? `Critical path (open): ${criticalTasks.map(t => t.slug).join(' → ')}` : 'No open critical tasks.',
