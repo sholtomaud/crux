@@ -34,6 +34,9 @@ import {
 } from './lib/db.ts';
 import type { Project, ProjectType, RunEnv, Task, TaskStatus, TaskType, TaskExecutor } from './lib/db.ts';
 
+import { applyTaskStatus } from './lib/task-transition.ts';
+import type { GuardFailure } from './lib/guards.ts';
+
 import { computeCpm, asciiDag, dotGraph } from './lib/cpm.ts';
 import type { CpmNode, CpmEdge } from './lib/cpm.ts';
 
@@ -121,6 +124,18 @@ function flag(args: string[], name: string): string | null {
   return i !== -1 && args[i + 1] ? args[i + 1] : null;
 }
 
+/** Numeric flag. Exits rather than silently dropping a value that won't parse. */
+function numFlag(args: string[], name: string): number | undefined {
+  const raw = flag(args, name);
+  if (raw === null) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(`${name} must be a non-negative number, got: ${raw}`);
+    process.exit(1);
+  }
+  return n;
+}
+
 function hasFlag(args: string[], name: string): boolean {
   return args.includes(name);
 }
@@ -148,7 +163,7 @@ TASKS
   task add <slug> <title>        Add task [--type coding|writing|research|accounting|verification|design|other]
   task show <slug>               Full detail: spec, CPM, deps, recent activity
   task type <slug> <type>        Set task type
-  task done <slug> [--note ""]   Mark done
+  task done <slug>               Mark done [--note ""] [--actual-days N]
   task start <slug>              Mark in-progress
   task block <slug> [--note ""]  Mark blocked
   task move <slug> <project>     Reassign task to another project (id|number|name)
@@ -481,9 +496,20 @@ function cmdTask(args: string[]): void {
   const newStatus = statusMap[sub];
   if (!newStatus) { console.error(`Unknown task sub-command: ${sub}`); process.exit(1); }
 
-  updateTaskStatus(db, proj.id, slug, newStatus);
+  // ADR-012: a status *asserted* by a human goes through the guards, and
+  // --actual-days is how the caller satisfies `actuals-missing` on the same
+  // call — the flag exists so the guard has an answer, not just an objection.
+  const transition = applyTaskStatus(db, proj.id, slug, newStatus, {
+    actor: 'human',
+    actualDays: numFlag(args, '--actual-days'),
+  });
+  if (!transition.applied) {
+    console.error(`✗ ${slug} → ${newStatus} refused: ${transition.blocked}`);
+    process.exit(1);
+  }
   logAudit(db, { project_id: proj.id, task_id: task.id, event: `task.${sub}`, detail: note, actor: 'human' });
   console.log(`✓ ${slug} → ${newStatus}${note ? ` (${note})` : ''}`);
+  for (const w of transition.warnings) console.error(`  ⚠ ${w.code}: ${w.reason}`);
 }
 
 // ── dep ───────────────────────────────────────────────────────────────────────
@@ -1388,7 +1414,15 @@ Omitted fields are left unchanged, so this is also the supported way to correct 
         const proj = requireProject();
         const task = taskBySlug(db, proj.id, slug);
         if (!task) return err(`Task not found: ${slug}`);
-        updateTaskStatus(db, proj.id, slug, status);
+        // ADR-012: status asserted by an agent goes through the guards, with
+        // actual_days written inside the same transaction so it can satisfy
+        // `actuals-missing` rather than trip it.
+        const transition = applyTaskStatus(db, proj.id, slug, status, {
+          actor: 'claude',
+          actualDays: actual_days ?? undefined,
+          estimatedBy: estimated_by,
+        });
+        if (!transition.applied) return err(transition.blocked!);
         applyTaskFields(proj.id, task, { phase, description, duration_days });
         if (value_score != null) updateTaskValueScore(db, task.id, value_score);
         if (priority != null) updateTaskPriority(db, task.id, priority);
@@ -1396,12 +1430,11 @@ Omitted fields are left unchanged, so this is also the supported way to correct 
         if (executor != null) updateTaskExecutor(db, task.id, executor);
         if (acceptance_criteria != null || files_affected != null)
           updateTaskSpec(db, task.id, { acceptance_criteria: acceptance_criteria ?? undefined, files_affected: files_affected ?? undefined });
-        if (actual_days != null) updateTaskActualDays(db, task.id, actual_days, estimated_by);
         logAudit(db, { project_id: proj.id, task_id: task.id, event: `task.${status}`, detail: note, actor: 'claude' });
         const calibrationNote = status === 'done' && actual_days == null
           ? 'Consider recording actual_days on this call for estimation calibration.'
           : undefined;
-        return ok({ slug, status, note, phase: phase ?? task.phase, duration_days: duration_days ?? task.duration_days, ...(description != null ? { description_updated: true } : {}), value_score: value_score ?? task.value_score, priority: priority ?? task.priority, task_type: task_type ?? task.task_type, executor: executor ?? task.executor, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote });
+        return ok({ slug, status, note, phase: phase ?? task.phase, duration_days: duration_days ?? task.duration_days, ...(description != null ? { description_updated: true } : {}), value_score: value_score ?? task.value_score, priority: priority ?? task.priority, task_type: task_type ?? task.task_type, executor: executor ?? task.executor, actual_days: actual_days ?? task.actual_days, calibration_note: calibrationNote, ...(transition.warnings.length ? { guard_warnings: transition.warnings } : {}) });
       } catch (e: unknown) { return err((e as Error).message); }
     }
   );
@@ -1437,7 +1470,20 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
           try {
             const task = taskBySlug(db, proj.id, u.slug);
             if (!task) return { slug: u.slug, ok: false, error: `Task not found: ${u.slug}` };
-            if (u.status != null) updateTaskStatus(db, proj.id, u.slug, u.status);
+            // Status first, so a guard refusal aborts this row before any
+            // other field is written (same rule as the web UI's PATCH).
+            let warnings: GuardFailure[] = [];
+            if (u.status != null) {
+              const transition = applyTaskStatus(db, proj.id, u.slug, u.status, {
+                actor: 'claude',
+                actualDays: u.actual_days ?? undefined,
+                estimatedBy: u.estimated_by,
+              });
+              if (!transition.applied) return { slug: u.slug, ok: false, error: transition.blocked };
+              warnings = transition.warnings;
+            } else if (u.actual_days != null) {
+              updateTaskActualDays(db, task.id, u.actual_days, u.estimated_by);
+            }
             applyTaskFields(proj.id, task, { phase: u.phase, description: u.description, duration_days: u.duration_days });
             if (u.value_score != null) updateTaskValueScore(db, task.id, u.value_score);
             if (u.priority != null) updateTaskPriority(db, task.id, u.priority);
@@ -1445,9 +1491,8 @@ A bad slug in one entry does not block the others — check each entry's "ok" fi
             if (u.executor != null) updateTaskExecutor(db, task.id, u.executor);
             if (u.acceptance_criteria != null || u.files_affected != null)
               updateTaskSpec(db, task.id, { acceptance_criteria: u.acceptance_criteria ?? undefined, files_affected: u.files_affected ?? undefined });
-            if (u.actual_days != null) updateTaskActualDays(db, task.id, u.actual_days, u.estimated_by);
             logAudit(db, { project_id: proj.id, task_id: task.id, event: 'task.bulk_update', detail: u.note, actor: 'claude' });
-            return { slug: u.slug, ok: true };
+            return { slug: u.slug, ok: true, ...(warnings.length ? { guard_warnings: warnings } : {}) };
           } catch (e: unknown) {
             return { slug: u.slug, ok: false, error: (e as Error).message };
           }

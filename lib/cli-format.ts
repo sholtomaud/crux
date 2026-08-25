@@ -40,8 +40,14 @@ function fileLine(entry: unknown): string {
   return `  - ${path ?? JSON.stringify(entry)}${signature ? `  ${signature}` : ''}`;
 }
 
+/**
+ * `dropped` gets its own mark rather than sharing `todo`'s dot. In a
+ * `Depends on:` list the difference is the whole message — a dropped edge is
+ * settled, a todo one is an unmet blocker — and rendering both as '·' made an
+ * open predecessor read as satisfied next to a '✓'.
+ */
 const STATUS_MARK: Record<Task['status'], string> = {
-  'done': '✓', 'in-progress': '▸', 'blocked': '✗', 'dropped': '·', 'todo': '·',
+  'done': '✓', 'in-progress': '▸', 'blocked': '✗', 'dropped': '⊘', 'todo': '·',
 };
 
 function refLine(t: TaskRef): string {

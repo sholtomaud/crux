@@ -125,6 +125,25 @@ describe('formatTaskDetail', () => {
     assert.ok(out.includes('✗ p1-b  B'));
   });
 
+  /**
+   * A todo predecessor is an unmet blocker; a dropped one is settled. They used
+   * to share '·', which made an open dependency read as satisfied next to the
+   * '✓' of a done one.
+   */
+  test('an unmet predecessor is marked differently from a dropped one', () => {
+    const out = formatTaskDetail(fakeTask(), {
+      predecessors: [
+        { slug: 'p1-done',    title: 'Done',    status: 'done' },
+        { slug: 'p1-todo',    title: 'Todo',    status: 'todo' },
+        { slug: 'p1-dropped', title: 'Dropped', status: 'dropped' },
+      ],
+      successors: [],
+    });
+    assert.ok(out.includes('✓ p1-done'));
+    assert.ok(out.includes('· p1-todo'));
+    assert.ok(out.includes('⊘ p1-dropped'));
+  });
+
   test('renders audit entries when supplied', () => {
     const out = formatTaskDetail(fakeTask(), {
       ...NO_DEPS,
