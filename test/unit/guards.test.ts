@@ -251,3 +251,72 @@ describe('guard policy', () => {
     assert.equal(applyTaskStatus(db, pid, 'real', 'in-progress').applied, true);
   });
 });
+
+// ── Actuals asserted with the status (ADR-012) ────────────────────────────────
+
+/**
+ * The flag exists so `actuals-missing` has an answer. If the write landed after
+ * the guard read the row — which is what every caller did before this — closing
+ * a task and recording its actuals on one call still warned, and the CLI
+ * dropped the value entirely.
+ */
+describe('actualDays supplied with the transition', () => {
+  test('satisfies actuals-missing on the same call', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    seedTask(db, pid, 'a', { duration_days: 3 });
+
+    const res = applyTaskStatus(db, pid, 'a', 'done', { actualDays: 0.5 });
+    assert.equal(res.applied, true);
+    assert.deepEqual(res.warnings, []);
+    assert.equal(taskBySlug(db, pid, 'a')!.actual_days, 0.5);
+  });
+
+  test('records estimated_by alongside it when given', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    seedTask(db, pid, 'a', { duration_days: 3 });
+    applyTaskStatus(db, pid, 'a', 'done', { actualDays: 2, estimatedBy: 'claude' });
+
+    const task = taskBySlug(db, pid, 'a')!;
+    assert.equal(task.actual_days, 2);
+    assert.equal(task.estimated_by, 'claude');
+  });
+
+  test('does not mask a different guard', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    const a = seedTask(db, pid, 'a');
+    const b = seedTask(db, pid, 'b', { duration_days: 2 });
+    addDependency(db, a, b);
+
+    const res = applyTaskStatus(db, pid, 'b', 'done', { actualDays: 1 });
+    assert.equal(res.applied, true);
+    assert.deepEqual(res.warnings.map(w => w.code), ['predecessors-incomplete']);
+  });
+
+  test('enforce rolls the actuals back with the refused status', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    const a = seedTask(db, pid, 'a');
+    const b = seedTask(db, pid, 'b', { duration_days: 2 });
+    addDependency(db, a, b);
+    setConfig(db, GUARD_POLICY_KEY, 'enforce');
+
+    const res = applyTaskStatus(db, pid, 'b', 'done', { actualDays: 1 });
+    assert.equal(res.applied, false);
+    const task = taskBySlug(db, pid, 'b')!;
+    assert.equal(task.status, 'todo');
+    assert.equal(task.actual_days, null, 'actuals must not survive a refused transition');
+  });
+
+  test('still lands when the policy is off', () => {
+    const db = makeDb();
+    const pid = seedProject(db);
+    seedTask(db, pid, 'a', { duration_days: 3 });
+    setConfig(db, GUARD_POLICY_KEY, 'off');
+
+    assert.equal(applyTaskStatus(db, pid, 'a', 'done', { actualDays: 0.25 }).applied, true);
+    assert.equal(taskBySlug(db, pid, 'a')!.actual_days, 0.25);
+  });
+});

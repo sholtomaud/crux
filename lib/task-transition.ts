@@ -15,8 +15,8 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
-import type { TaskStatus } from './db/types.ts';
-import { taskBySlug, updateTaskStatus } from './db/tasks.ts';
+import type { EstimatedBy, TaskStatus } from './db/types.ts';
+import { taskBySlug, updateTaskStatus, updateTaskActualDays } from './db/tasks.ts';
 import { logAudit } from './db/audit.ts';
 import { evaluateTransition, guardPolicy, formatFailures } from './guards.ts';
 import type { GuardFailure } from './guards.ts';
@@ -34,10 +34,25 @@ export function applyTaskStatus(
   projectId: string,
   slug: string,
   status: TaskStatus,
-  opts: { actor?: 'human' | 'crux-auto' | 'claude' } = {},
+  opts: {
+    actor?: 'human' | 'crux-auto' | 'claude';
+    /**
+     * Actuals asserted alongside the status. Written *before* the guards run,
+     * because `actuals-missing` reads the row: ADR-012 requires every guard to
+     * be satisfiable by the caller, and this is how the caller satisfies that
+     * one on the same call that closes the task. Inside the transaction, so an
+     * `enforce` refusal rolls the actuals back with the status.
+     */
+    actualDays?: number;
+    estimatedBy?: EstimatedBy;
+  } = {},
 ): TransitionResult {
   const policy = guardPolicy(db);
   if (policy === 'off') {
+    if (opts.actualDays != null) {
+      const task = taskBySlug(db, projectId, slug);
+      if (task) updateTaskActualDays(db, task.id, opts.actualDays, opts.estimatedBy);
+    }
     updateTaskStatus(db, projectId, slug, status);
     return { applied: true, warnings: [] };
   }
@@ -48,6 +63,11 @@ export function applyTaskStatus(
     if (!task) {
       db.exec('ROLLBACK');
       return { applied: false, warnings: [], blocked: `task not found: ${slug}` };
+    }
+
+    if (opts.actualDays != null) {
+      updateTaskActualDays(db, task.id, opts.actualDays, opts.estimatedBy);
+      task.actual_days = opts.actualDays;
     }
 
     const failures = evaluateTransition(db, task, status);
